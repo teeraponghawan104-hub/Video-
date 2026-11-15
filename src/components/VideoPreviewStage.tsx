@@ -225,16 +225,16 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
 
   const aspectContainerClass =
     activePreset.aspectRatio === '16:9'
-      ? 'aspect-video max-w-[700px] w-full'
+      ? 'aspect-video max-w-[680px] w-full'
       : activePreset.aspectRatio === '4:5'
-      ? 'aspect-[4/5] h-[480px]'
-      : 'aspect-[9/16] h-[500px]';
+      ? 'aspect-[4/5] h-[250px] sm:h-[420px] lg:h-[470px]'
+      : 'aspect-[9/16] h-[270px] sm:h-[430px] lg:h-[480px]';
 
   return (
     <div className="flex flex-col h-full bg-[#0E131F] border border-slate-800/80 rounded-2xl overflow-hidden">
       {/* Minimal Top Bar: Clip switcher on left, Upload on right */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-800/70">
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b border-slate-800/70">
+        <div className="flex items-center gap-1 overflow-x-auto">
           {DEMO_CLIPS.map((clip) => {
             const isSelected = !uploadedVideoUrl && selectedDemoClip.id === clip.id;
             return (
@@ -245,23 +245,23 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
                   onClearUploadedVideo();
                   onSelectDemoClip(clip);
                 }}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                className={`min-h-[36px] px-2.5 py-1 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                   isSelected
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {clip.id === 'street_vlog'
-                  ? 'ตัวอย่าง: Vlog กลางคืน'
+                  ? 'Vlog กลางคืน'
                   : clip.id === 'skincare_studio'
-                  ? 'ตัวอย่าง: รีวิวสินค้า'
-                  : 'ตัวอย่าง: คลิปแนวนอน'}
+                  ? 'รีวิวสินค้า'
+                  : 'คลิป 16:9'}
               </button>
             );
           })}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <input
             ref={fileInputRef}
             type="file"
@@ -271,23 +271,23 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
             aria-label="อัปโหลดไฟล์วิดีโอจากเครื่อง"
           />
           {uploadedVideoName && (
-            <span className="text-xs text-orange-400 truncate max-w-[140px]">
+            <span className="hidden sm:inline text-xs text-orange-400 truncate max-w-[120px]">
               {uploadedVideoName}
             </span>
           )}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[36px] inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1 text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Upload className="w-3.5 h-3.5 text-orange-400" />
-            <span>เลือกไฟล์วิดีโอ</span>
+            <span>เลือกวิดีโอ</span>
           </button>
         </div>
       </div>
 
       {/* Center Canvas Stage */}
-      <div className="relative flex-1 flex flex-col items-center justify-center p-5 bg-[#080B12] select-none">
+      <div className="relative flex-1 flex flex-col items-center justify-center p-3 sm:p-5 bg-[#080B12] select-none">
         <div
           className={`relative ${aspectContainerClass} bg-slate-950 border border-slate-800/90 rounded-xl overflow-hidden shadow-xl cursor-ew-resize`}
           onPointerDown={(e) => {
@@ -307,14 +307,14 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
           />
 
           {/* Subtle Corner Badges */}
-          {splitPct > 15 && (
-            <div className="absolute top-3 left-3 pointer-events-none bg-black/70 px-2.5 py-1 rounded-md text-[11px] text-slate-300">
+          {splitPct > 18 && (
+            <div className="absolute top-2.5 left-2.5 pointer-events-none bg-black/75 px-2 py-0.5 rounded text-[10px] text-slate-300 whitespace-nowrap">
               ก่อนทำ
             </div>
           )}
-          {splitPct < 85 && (
-            <div className="absolute top-3 right-3 pointer-events-none bg-black/75 px-2.5 py-1 rounded-md text-[11px] text-orange-300 font-medium">
-              หลังอัพสเกล ({metrics.outputWidth}×{metrics.outputHeight})
+          {splitPct < 82 && (
+            <div className="absolute top-2.5 right-2.5 pointer-events-none bg-black/80 px-2 py-0.5 rounded text-[10px] text-orange-300 font-medium whitespace-nowrap">
+              หลังอัพสเกล HD
             </div>
           )}
 
@@ -369,13 +369,13 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
       </div>
 
       {/* Minimal Bottom Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-slate-800/70">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 sm:px-5 py-3 border-t border-slate-800/70">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => setIsPlaying((prev) => !prev)}
             aria-label={isPlaying ? 'หยุดเล่นชั่วคราว' : 'เล่นวิดีโอ'}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800/90 hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800/90 hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
             <span>{isPlaying ? 'หยุดเล่น' : 'เล่นวิดีโอ'}</span>
@@ -384,36 +384,36 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
           <button
             type="button"
             onClick={() => setSplitPct(splitPct === 0 ? 50 : 0)}
-            className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
-            {splitPct === 0 ? 'แบ่งครึ่งเทียบต้นฉบับ' : 'ดูภาพอัพสเกลเต็มจอ'}
+            {splitPct === 0 ? 'เทียบต้นฉบับ 50/50' : 'ดูภาพเต็ม 100%'}
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {activePreset.aspectRatio === '9:16' && (
             <button
               type="button"
               onClick={() => setShowSafeZone((prev) => !prev)}
               aria-pressed={showSafeZone}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+              className={`min-h-[38px] inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                 showSafeZone
                   ? 'bg-rose-500/20 text-rose-200 border border-rose-500/40'
                   : 'text-slate-400 hover:text-slate-200 bg-slate-800/50'
               }`}
             >
               <Eye className="w-3.5 h-3.5" />
-              <span>เช็คกรอบ TikTok</span>
+              <span>กรอบ TikTok</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={onCaptureSnapshot}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[38px] inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>บันทึกภาพนิ่ง</span>
+            <span>เซฟภาพ</span>
           </button>
         </div>
       </div>

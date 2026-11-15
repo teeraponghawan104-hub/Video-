@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="50%" stop-color="#090D16" />
+      <stop offset="100%" stop-color="#1E1B4B" />
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FB923C" />
+      <stop offset="100%" stop-color="#EA580C" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+  </defs>
+
+  <!-- App Squircle Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect x="16" y="16" width="480" height="480" rx="98" fill="none" stroke="#334155" stroke-width="4" stroke-opacity="0.6" />
+
+  <!-- Left Half: Pixelated Low-Res Frame Representation -->
+  <g opacity="0.85">
+    <rect x="96" y="128" width="144" height="256" rx="20" fill="#1E293B" stroke="#475569" stroke-width="6" />
+    <!-- Pixel blocks -->
+    <rect x="120" y="164" width="36" height="36" rx="4" fill="#38BDF8" opacity="0.45" />
+    <rect x="164" y="164" width="36" height="36" rx="4" fill="#38BDF8" opacity="0.25" />
+    <rect x="120" y="208" width="36" height="36" rx="4" fill="#38BDF8" opacity="0.25" />
+    <rect x="164" y="208" width="36" height="36" rx="4" fill="#38BDF8" opacity="0.65" />
+    <rect x="120" y="252" width="80" height="24" rx="4" fill="#64748B" opacity="0.5" />
+  </g>
+
+  <!-- Right Half: Ultra-Crisp 4K Upscaled Frame -->
+  <g>
+    <rect x="256" y="108" width="164" height="296" rx="24" fill="url(#orangeGrad)" />
+    <rect x="268" y="120" width="140" height="272" rx="16" fill="#090D16" />
+    <!-- Crisp Play & Upscale Arrow Symbol -->
+    <path d="M312 192 L376 236 L312 280 Z" fill="url(#orangeGrad)" />
+    <!-- 4K Badge -->
+    <rect x="292" y="314" width="92" height="36" rx="10" fill="#FB923C" fill-opacity="0.18" stroke="#FB923C" stroke-width="3" />
+    <text x="338" y="339" font-family="sans-serif" font-weight="800" font-size="22" fill="#FDBA74" text-anchor="middle">4K 60</text>
+  </g>
+
+  <!-- Center Split Comparison Divider Line & Handle -->
+  <line x1="248" y1="84" x2="248" y2="428" stroke="#FB923C" stroke-width="8" stroke-linecap="round" />
+  <circle cx="248" cy="256" r="26" fill="#090D16" stroke="#FB923C" stroke-width="7" />
+  <path d="M236 256 L243 249 L243 263 Z" fill="#F8FAFC" />
+  <path d="M260 256 L253 249 L253 263 Z" fill="#F8FAFC" />
+</svg>

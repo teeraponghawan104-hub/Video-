@@ -11,7 +11,18 @@ import { VideoPreviewStage } from './components/VideoPreviewStage';
 import { EnhancementControls } from './components/EnhancementControls';
 import { RenderJob, RenderQueuePanel } from './components/RenderQueuePanel';
 import { PlatformGuideSection } from './components/PlatformGuideSection';
-import { CheckCircle2, Download, X } from 'lucide-react';
+import { AppLogoIcon } from './components/AppLogoIcon';
+import { PWAInstallModal } from './components/PWAInstallModal';
+import { usePWAInstall } from './utils/usePWAInstall';
+import {
+  CheckCircle2,
+  Download,
+  X,
+  Sparkles,
+  FolderDown,
+  Sliders,
+  Smartphone,
+} from 'lucide-react';
 
 type ActiveTab = 'studio' | 'queue' | 'specs';
 
@@ -31,6 +42,7 @@ export default function App() {
   });
 
   const [isExportingNow, setIsExportingNow] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
   const [bannerNotice, setBannerNotice] = useState<{
     title: string;
     subtitle: string;
@@ -38,6 +50,7 @@ export default function App() {
     downloadName?: string;
   } | null>(null);
 
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [renderJobs, setRenderJobs] = useState<RenderJob[]>([
@@ -153,7 +166,7 @@ export default function App() {
           return { url: URL.createObjectURL(blob), ext: 'webm' };
         }
       } catch {
-        // Fallback to high-res PNG below
+        // Fallback to PNG below
       }
     }
 
@@ -280,27 +293,28 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#080B12] text-slate-100">
-      {/* Strict 3-Zone Top Bar Contract — Ultra Clean & Minimal */}
-      <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-[#0B0F19] border-b border-slate-800/70">
-        {/* Zone 1: Single text element wordmark */}
+    <div className="min-h-screen flex flex-col bg-[#080B12] text-slate-100 pb-16 md:pb-0">
+      {/* Strict 3-Zone Top Bar Contract — Recognizable App Icon + Nav + Primary Action */}
+      <header className="h-12 md:h-14 flex items-center justify-between gap-4 md:gap-8 px-4 sm:px-6 bg-[#0B0F19]/95 backdrop-blur-md border-b border-slate-800/70 sticky top-0 z-30">
+        {/* Zone 1: App Icon + Brand Wordmark */}
         <a
           href="#studio"
           onClick={(e) => {
             e.preventDefault();
             setActiveTab('studio');
           }}
-          className="text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2.5 text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
         >
-          KrispScale
+          <AppLogoIcon className="w-7 h-7 sm:w-8 sm:h-8 shrink-0 rounded-lg shadow-md" />
+          <span>KrispScale</span>
         </a>
 
-        {/* Zone 2: Concise single-line navigation links */}
-        <nav aria-label="เมนูหลัก" className="flex items-center gap-6 text-sm font-medium">
+        {/* Zone 2: Desktop Navigation Links */}
+        <nav aria-label="เมนูหลัก" className="hidden md:flex items-center gap-6 text-sm font-medium">
           <button
             type="button"
             onClick={() => setActiveTab('studio')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
+            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
               activeTab === 'studio'
                 ? 'text-white underline underline-offset-8 decoration-orange-500 decoration-2'
                 : 'text-slate-400 hover:text-slate-200'
@@ -311,7 +325,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => setActiveTab('queue')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
+            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
               activeTab === 'queue'
                 ? 'text-white underline underline-offset-8 decoration-orange-500 decoration-2'
                 : 'text-slate-400 hover:text-slate-200'
@@ -322,7 +336,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => setActiveTab('specs')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
+            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
               activeTab === 'specs'
                 ? 'text-white underline underline-offset-8 decoration-orange-500 decoration-2'
                 : 'text-slate-400 hover:text-slate-200'
@@ -330,15 +344,24 @@ export default function App() {
           >
             ตารางบิตเรต TikTok
           </button>
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={() => setShowInstallModal(true)}
+              className="text-slate-400 hover:text-orange-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer"
+            >
+              ติดตั้งแอป
+            </button>
+          )}
         </nav>
 
-        {/* Zone 3: 1 primary action */}
+        {/* Zone 3: 1 Primary Action */}
         <div className="flex items-center shrink-0">
           <button
             type="button"
             onClick={handleStartImmediateExport}
             disabled={isExportingNow}
-            className="px-4 py-2 text-xs font-semibold text-slate-950 bg-orange-500 hover:bg-orange-400 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="min-h-[36px] px-3.5 sm:px-4 py-1.5 text-xs font-semibold text-slate-950 bg-orange-500 hover:bg-orange-400 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             {isExportingNow ? 'กำลังเรนเดอร์...' : 'ส่งออกวิดีโอ HD'}
           </button>
@@ -346,14 +369,14 @@ export default function App() {
       </header>
 
       {/* Main Content Container */}
-      <main className="flex-1 max-w-[1320px] w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <main className="flex-1 max-w-[1320px] w-full mx-auto px-3.5 sm:px-6 py-4 sm:py-6 space-y-4">
         {/* Notification Banner when Export / Snapshot completes */}
         {bannerNotice && (
           <div
             role="status"
-            className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-emerald-100"
+            className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-emerald-100"
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <div className="text-xs sm:text-sm">
                 <span className="font-semibold">{bannerNotice.title}</span>
@@ -383,12 +406,12 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 1: Minimalist 2-Column Studio Workspace */}
+        {/* TAB 1: Minimalist 2-Column Studio Workspace (Adapts seamlessly from 390px iOS/Android to 1440px PC) */}
         {activeTab === 'studio' && (
           <section
             id="studio-workspace"
             aria-label="พื้นที่อัพสเกลวิดีโอ"
-            className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch"
+            className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch"
           >
             {/* Left 7 Cols: Clean Video Preview */}
             <div className="lg:col-span-7 flex flex-col lg:h-[680px]">
@@ -446,6 +469,65 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Mobile Bottom Tab Bar for Android & iOS (< 768px) — Height 56px (h-14), within 15% sticky budget */}
+      <nav
+        aria-label="เมนูมือถือ"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-[#0B0F19]/95 backdrop-blur-md border-t border-slate-800/80 grid grid-cols-4 items-center px-2"
+      >
+        <button
+          type="button"
+          onClick={() => setActiveTab('studio')}
+          className={`min-h-[44px] flex flex-col items-center justify-center rounded-lg transition-colors ${
+            activeTab === 'studio' ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">อัพสเกล</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('queue')}
+          className={`min-h-[44px] flex flex-col items-center justify-center rounded-lg transition-colors ${
+            activeTab === 'queue' ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <FolderDown className="w-4 h-4" />
+          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">
+            ไฟล์ ({renderJobs.length})
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('specs')}
+          className={`min-h-[44px] flex flex-col items-center justify-center rounded-lg transition-colors ${
+            activeTab === 'specs' ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">บิตเรต</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowInstallModal(true)}
+          className="min-h-[44px] flex flex-col items-center justify-center rounded-lg text-slate-400 hover:text-orange-400 transition-colors"
+        >
+          <Smartphone className="w-4 h-4" />
+          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">ติดตั้งแอป</span>
+        </button>
+      </nav>
+
+      {/* Cross-Platform Install Modal (PC, Android, iOS) */}
+      <PWAInstallModal
+        isOpen={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+        isInstallable={isInstallable}
+        isIOS={isIOS}
+        onTriggerInstall={install}
+      />
     </div>
   );
 }
