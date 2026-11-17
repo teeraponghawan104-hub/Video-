@@ -5,6 +5,8 @@ import {
   Upload,
   Eye,
   Camera,
+  Columns,
+  Film,
 } from 'lucide-react';
 import {
   EnhancementSettings,
@@ -12,11 +14,10 @@ import {
   PlatformPreset,
 } from '../utils/upscaleEngine';
 import {
-  DEMO_CLIPS,
   DemoClipSpec,
-  drawProceduralSourceFrame,
   renderSplitComparisonFrame,
 } from '../utils/canvasProcessor';
+import { exportHighResSnapshot } from '../utils/videoExporter';
 
 interface VideoPreviewStageProps {
   activePreset: PlatformPreset;
@@ -26,11 +27,14 @@ interface VideoPreviewStageProps {
   onSelectDemoClip: (clip: DemoClipSpec) => void;
   uploadedVideoUrl: string | null;
   uploadedVideoName: string | null;
+  sourceDims: { width: number; height: number; durationSec: number };
   onUploadVideo: (file: File) => void;
   onClearUploadedVideo: () => void;
   onSourceDimensionsChange: (width: number, height: number, durationSec: number) => void;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  onCaptureSnapshot: () => void;
+  videoElRef: React.MutableRefObject<HTMLVideoElement | null>;
+  isExportingNow: boolean;
+  onCaptureSnapshot: (fullResDataUrl: string) => void;
 }
 
 export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
@@ -38,24 +42,26 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
   settings,
   metrics,
   selectedDemoClip,
-  onSelectDemoClip,
   uploadedVideoUrl,
   uploadedVideoName,
+  sourceDims,
   onUploadVideo,
-  onClearUploadedVideo,
   onSourceDimensionsChange,
   canvasRef,
+  videoElRef,
+  isExportingNow,
   onCaptureSnapshot,
 }) => {
   const [isPlaying, setIsPlaying] = useState(true);
-  const [splitPct, setSplitPct] = useState(50);
-  // Default Safe Zone to FALSE so the video canvas is clean and minimal on load
+  const [splitPct, setSplitPct] = useState(0);
   const [showSafeZone, setShowSafeZone] = useState(false);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const [isDraggingFileOver, setIsDraggingFileOver] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const videoElRef = useRef<HTMLVideoElement | null>(null);
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const activeVideoSrc = uploadedVideoUrl || '/assets/sample_story_1080p.mp4';
 
   const stateRef = useRef({
     isPlaying,
@@ -63,7 +69,8 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
     activePreset,
     settings,
     selectedDemoClip,
-    uploadedVideoUrl,
+    activeVideoSrc,
+    isExportingNow,
   });
 
   useEffect(() => {
@@ -73,31 +80,27 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
       activePreset,
       settings,
       selectedDemoClip,
-      uploadedVideoUrl,
+      activeVideoSrc,
+      isExportingNow,
     };
-  }, [isPlaying, splitPct, activePreset, settings, selectedDemoClip, uploadedVideoUrl]);
+  }, [isPlaying, splitPct, activePreset, settings, selectedDemoClip, activeVideoSrc, isExportingNow]);
 
   useEffect(() => {
-    if (!uploadedVideoUrl) {
-      onSourceDimensionsChange(
-        selectedDemoClip.sourceWidth,
-        selectedDemoClip.sourceHeight,
-        selectedDemoClip.durationSec
-      );
-      return;
-    }
-
     const vid = document.createElement('video');
-    vid.src = uploadedVideoUrl;
+    vid.src = activeVideoSrc;
     vid.muted = true;
     vid.loop = true;
     vid.playsInline = true;
     vid.crossOrigin = 'anonymous';
+    vid.preload = 'auto';
 
     const handleLoadedMetadata = () => {
-      const w = vid.videoWidth || 720;
-      const h = vid.videoHeight || 1280;
-      const dur = Number.isFinite(vid.duration) && vid.duration > 0 ? Math.round(vid.duration) : 12;
+      const w = vid.videoWidth || 1080;
+      const h = vid.videoHeight || 1920;
+      const dur =
+        Number.isFinite(vid.duration) && vid.duration > 0
+          ? Number(vid.duration.toFixed(1))
+          : 3.5;
       onSourceDimensionsChange(w, h, dur);
       vid.play().catch(() => {});
     };
@@ -110,7 +113,7 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
       vid.removeEventListener('loadedmetadata', handleLoadedMetadata);
       videoElRef.current = null;
     };
-  }, [uploadedVideoUrl, selectedDemoClip, onSourceDimensionsChange]);
+  }, [activeVideoSrc, onSourceDimensionsChange, videoElRef]);
 
   useEffect(() => {
     const vid = videoElRef.current;
@@ -124,8 +127,6 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
 
   useEffect(() => {
     let rafId = 0;
-    let startTime = performance.now();
-    let pausedElapsed = 0;
     let lastDrawTime = 0;
 
     if (!offscreenCanvasRef.current) {
@@ -135,28 +136,22 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
     const renderLoop = (now: number) => {
       rafId = requestAnimationFrame(renderLoop);
 
-      if (now - lastDrawTime < 42) {
+      const {
+        splitPct: currentSplit,
+        activePreset: preset,
+        settings: enhSettings,
+        isExportingNow: exporting,
+      } = stateRef.current;
+
+      const minInterval = exporting ? 90 : 42;
+      if (now - lastDrawTime < minInterval) {
         return;
       }
       lastDrawTime = now;
 
-      const {
-        isPlaying: playing,
-        splitPct: currentSplit,
-        activePreset: preset,
-        settings: enhSettings,
-        selectedDemoClip: demoClip,
-        uploadedVideoUrl: customUrl,
-      } = stateRef.current;
-
-      if (playing) {
-        pausedElapsed = (now - startTime) / 1000;
-      } else {
-        startTime = now - pausedElapsed * 1000;
-      }
-
       const targetCanvas = canvasRef.current;
       const offscreen = offscreenCanvasRef.current;
+      const effectiveSplit = exporting ? 0 : currentSplit;
 
       if (targetCanvas && offscreen) {
         const previewHeight =
@@ -169,37 +164,36 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
           targetCanvas.height = previewHeight;
         }
 
-        if (customUrl && videoElRef.current && videoElRef.current.readyState >= 2) {
-          const vid = videoElRef.current;
+        const vid = videoElRef.current;
+        if (vid && vid.readyState >= 2 && vid.videoWidth > 0) {
+          const vw = vid.videoWidth;
+          const vh = vid.videoHeight;
+          if (offscreen.width !== vw || offscreen.height !== vh) {
+            offscreen.width = vw;
+            offscreen.height = vh;
+          }
+          const offCtx = offscreen.getContext('2d');
+          if (offCtx) {
+            offCtx.drawImage(vid, 0, 0, vw, vh);
+          }
           renderSplitComparisonFrame(
             targetCanvas,
             vid,
-            vid.videoWidth || 720,
-            vid.videoHeight || 1280,
+            vw,
+            vh,
             preset,
             enhSettings,
-            currentSplit
+            effectiveSplit
           );
-        } else {
-          const srcW = demoClip.sourceWidth;
-          const srcH = demoClip.sourceHeight;
-          if (offscreen.width !== srcW || offscreen.height !== srcH) {
-            offscreen.width = srcW;
-            offscreen.height = srcH;
-          }
-          const offCtx = offscreen.getContext('2d');
-          const loopedTime = pausedElapsed % demoClip.durationSec;
-          if (offCtx) {
-            drawProceduralSourceFrame(offCtx, srcW, srcH, loopedTime, demoClip.id, true);
-          }
+        } else if (offscreen.width > 0 && offscreen.height > 0) {
           renderSplitComparisonFrame(
             targetCanvas,
             offscreen,
-            srcW,
-            srcH,
+            offscreen.width,
+            offscreen.height,
             preset,
             enhSettings,
-            currentSplit
+            effectiveSplit
           );
         }
       }
@@ -207,19 +201,57 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
 
     rafId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(rafId);
-  }, [canvasRef]);
+  }, [canvasRef, videoElRef]);
 
   const handlePointerMoveOnCanvas = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingSplit) return;
+    if (!isDraggingSplit || splitPct === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const relX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const relX = Math.max(4, Math.min(rect.width - 4, e.clientX - rect.left));
     setSplitPct(Math.round((relX / rect.width) * 100));
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSplitPct(0);
       onUploadVideo(file);
+      e.target.value = '';
+    }
+  };
+
+  const handleDropFile = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingFileOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('video/')) {
+      setSplitPct(0);
+      onUploadVideo(file);
+    }
+  };
+
+  const handleTakePureSnapshot = () => {
+    if (videoElRef.current && videoElRef.current.readyState >= 2) {
+      const vid = videoElRef.current;
+      const dataUrl = exportHighResSnapshot(
+        vid,
+        vid.videoWidth || 1080,
+        vid.videoHeight || 1920,
+        activePreset,
+        settings,
+        metrics
+      );
+      onCaptureSnapshot(dataUrl);
+    } else if (offscreenCanvasRef.current && offscreenCanvasRef.current.width > 0) {
+      const off = offscreenCanvasRef.current;
+      const dataUrl = exportHighResSnapshot(
+        off,
+        off.width,
+        off.height,
+        activePreset,
+        settings,
+        metrics
+      );
+      onCaptureSnapshot(dataUrl);
     }
   };
 
@@ -231,34 +263,29 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
       : 'aspect-[9/16] h-[270px] sm:h-[430px] lg:h-[480px]';
 
   return (
-    <div className="flex flex-col h-full bg-[#0E131F] border border-slate-800/80 rounded-2xl overflow-hidden">
-      {/* Minimal Top Bar: Clip switcher on left, Upload on right */}
-      <div className="flex items-center justify-between gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b border-slate-800/70">
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {DEMO_CLIPS.map((clip) => {
-            const isSelected = !uploadedVideoUrl && selectedDemoClip.id === clip.id;
-            return (
-              <button
-                key={clip.id}
-                type="button"
-                onClick={() => {
-                  onClearUploadedVideo();
-                  onSelectDemoClip(clip);
-                }}
-                className={`min-h-[36px] px-2.5 py-1 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
-                  isSelected
-                    ? 'bg-slate-800 text-white'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {clip.id === 'street_vlog'
-                  ? 'Vlog กลางคืน'
-                  : clip.id === 'skincare_studio'
-                  ? 'รีวิวสินค้า'
-                  : 'คลิป 16:9'}
-              </button>
-            );
-          })}
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDraggingFileOver(true);
+      }}
+      onDragLeave={() => setIsDraggingFileOver(false)}
+      onDrop={handleDropFile}
+      className={`flex flex-col h-full bg-[#0E131F] border rounded-2xl overflow-hidden transition-colors ${
+        isDraggingFileOver ? 'border-orange-500 bg-orange-950/10' : 'border-slate-800/80'
+      }`}
+    >
+      {/* Top Bar: Active Video Info on left, Prominent Upload Button on right */}
+      <div className="flex items-center justify-between gap-2 px-3.5 sm:px-5 py-2.5 sm:py-3 border-b border-slate-800/70">
+        <div className="flex items-center gap-2 min-w-0">
+          <Film className="w-4 h-4 text-orange-400 shrink-0" />
+          <div className="truncate text-xs">
+            <span className="font-medium text-slate-200 truncate">
+              {uploadedVideoName || 'คลิปตัวอย่างพร้อมทดสอบ (.MP4)'}
+            </span>
+            <span className="text-slate-400 ml-2 font-mono">
+              ({sourceDims.width}×{sourceDims.height} · {sourceDims.durationSec}s)
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -270,18 +297,13 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
             className="hidden"
             aria-label="อัปโหลดไฟล์วิดีโอจากเครื่อง"
           />
-          {uploadedVideoName && (
-            <span className="hidden sm:inline text-xs text-orange-400 truncate max-w-[120px]">
-              {uploadedVideoName}
-            </span>
-          )}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="min-h-[36px] inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1 text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="min-h-[36px] inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold text-white bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/50 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5 text-orange-400" />
-            <span>เลือกวิดีโอ</span>
+            <span>เลือกวิดีโอจากเครื่อง</span>
           </button>
         </div>
       </div>
@@ -289,11 +311,14 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
       {/* Center Canvas Stage */}
       <div className="relative flex-1 flex flex-col items-center justify-center p-3 sm:p-5 bg-[#080B12] select-none">
         <div
-          className={`relative ${aspectContainerClass} bg-slate-950 border border-slate-800/90 rounded-xl overflow-hidden shadow-xl cursor-ew-resize`}
+          className={`relative ${aspectContainerClass} bg-slate-950 border border-slate-800/90 rounded-xl overflow-hidden shadow-xl ${
+            splitPct > 0 ? 'cursor-ew-resize' : 'cursor-default'
+          }`}
           onPointerDown={(e) => {
+            if (splitPct === 0) return;
             setIsDraggingSplit(true);
             const rect = e.currentTarget.getBoundingClientRect();
-            const relX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+            const relX = Math.max(4, Math.min(rect.width - 4, e.clientX - rect.left));
             setSplitPct(Math.round((relX / rect.width) * 100));
           }}
           onPointerMove={handlePointerMoveOnCanvas}
@@ -306,19 +331,30 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
             className="w-full h-full object-contain block"
           />
 
+          {/* Pure DOM Split Divider Overlay (Only shown when user activates 50/50 Compare Mode; NEVER baked into canvas or video export!) */}
+          {splitPct > 0 && splitPct < 100 && (
+            <div
+              style={{ left: `${splitPct}%` }}
+              className="absolute top-0 bottom-0 -translate-x-1/2 pointer-events-none flex flex-col items-center justify-center"
+            >
+              <div className="w-0.5 h-full bg-orange-500/90" />
+              <div className="absolute w-7 h-7 rounded-full bg-slate-950 border-2 border-orange-500 flex items-center justify-center text-[10px] text-white font-mono shadow-lg">
+                ↔
+              </div>
+            </div>
+          )}
+
           {/* Subtle Corner Badges */}
           {splitPct > 18 && (
             <div className="absolute top-2.5 left-2.5 pointer-events-none bg-black/75 px-2 py-0.5 rounded text-[10px] text-slate-300 whitespace-nowrap">
               ก่อนทำ
             </div>
           )}
-          {splitPct < 82 && (
-            <div className="absolute top-2.5 right-2.5 pointer-events-none bg-black/80 px-2 py-0.5 rounded text-[10px] text-orange-300 font-medium whitespace-nowrap">
-              หลังอัพสเกล HD
-            </div>
-          )}
+          <div className="absolute top-2.5 right-2.5 pointer-events-none bg-black/80 px-2 py-0.5 rounded text-[10px] text-orange-300 font-medium whitespace-nowrap">
+            อัพสเกล HD {metrics.outputWidth}×{metrics.outputHeight}
+          </div>
 
-          {/* Optional Safe Zone Guide (Only visible when toggled on) */}
+          {/* Optional Safe Zone Guide */}
           {showSafeZone && activePreset.aspectRatio === '9:16' && (
             <div
               data-testid="tiktok-safe-zone-overlay"
@@ -358,13 +394,17 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
           data-testid="output-resolution-readout"
           className="mt-3 flex items-center gap-2 text-xs text-slate-400 font-mono tabular-nums"
         >
-          <span>ลากเส้นสีส้มบนภาพเพื่อเทียบความคมชัด</span>
+          <span>
+            {splitPct > 0
+              ? 'โหมดเปรียบเทียบก่อน/หลัง (เส้นแบ่งจะไม่ติดไปในไฟล์ .MP4 ที่ส่งออก)'
+              : 'แสดงผลภาพอัพสเกลเต็มจอ 100%'}
+          </span>
           <span aria-hidden="true">·</span>
           <span className="text-slate-200">
             {metrics.outputWidth}×{metrics.outputHeight} ({metrics.effectiveFps} FPS)
           </span>
           <span aria-hidden="true">·</span>
-          <span>{metrics.targetBitrateMbps} Mbps</span>
+          <span>MP4 (H.264)</span>
         </div>
       </div>
 
@@ -384,9 +424,15 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
           <button
             type="button"
             onClick={() => setSplitPct(splitPct === 0 ? 50 : 0)}
-            className="min-h-[38px] px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            aria-pressed={splitPct > 0}
+            className={`min-h-[38px] inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+              splitPct > 0
+                ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40'
+                : 'text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800'
+            }`}
           >
-            {splitPct === 0 ? 'เทียบต้นฉบับ 50/50' : 'ดูภาพเต็ม 100%'}
+            <Columns className="w-3.5 h-3.5" />
+            <span>{splitPct === 0 ? 'เทียบก่อน/หลัง 50/50' : 'ปิดเส้นแบ่ง (ดูเต็มจอ)'}</span>
           </button>
         </div>
 
@@ -409,11 +455,11 @@ export const VideoPreviewStage: React.FC<VideoPreviewStageProps> = ({
 
           <button
             type="button"
-            onClick={onCaptureSnapshot}
+            onClick={handleTakePureSnapshot}
             className="min-h-[38px] inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>เซฟภาพ</span>
+            <span>เซฟภาพนิ่ง</span>
           </button>
         </div>
       </div>

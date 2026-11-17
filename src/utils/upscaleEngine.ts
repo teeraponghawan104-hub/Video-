@@ -424,3 +424,66 @@ export function validateCustomPresetName(name: string): { valid: boolean; error?
   }
   return { valid: true };
 }
+
+/**
+ * Builds a complete, hardware/CPU-safe FFmpeg video filtergraph (-vf) string
+ * combining Lanczos scaling, aspect-ratio reframing, 3D temporal denoise (hqdn3d),
+ * Contrast-Adaptive Sharpening (cas + unsharp), color grading (eq), and yuv420p output.
+ */
+export function buildFfmpegFilterChain(params: {
+  targetWidth: number;
+  targetHeight: number;
+  effectiveFps: number;
+  sharpness: number;
+  deblockDenoise: number;
+  microContrast: number;
+  vibrance: number;
+  brightness: number;
+  reframeMode: ReframeMode;
+}): string {
+  const maxDim = Math.max(params.targetWidth, params.targetHeight);
+  const capScale = maxDim > 3840 ? 3840 / maxDim : 1;
+  const w = Math.max(2, Math.round((params.targetWidth * capScale) / 2) * 2);
+  const h = Math.max(2, Math.round((params.targetHeight * capScale) / 2) * 2);
+
+  const stages: string[] = [];
+
+  if (params.reframeMode === 'stretch') {
+    stages.push(`scale=${w}:${h}:flags=lanczos,setsar=1`);
+  } else if (params.reframeMode === 'fit-blur') {
+    stages.push(
+      `split[bg][fg];[bg]scale=${w}:${h}:force_original_aspect_ratio=increase:force_divisible_by=2:flags=fast_bilinear,crop=${w}:${h},boxblur=16:2[bgblur];[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos[fgscaled];[bgblur][fgscaled]overlay=(W-w)/2:(H-h)/2,setsar=1`
+    );
+  } else {
+    stages.push(
+      `scale=${w}:${h}:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos,crop=${w}:${h},setsar=1`
+    );
+  }
+
+  const dn = Math.min(100, Math.max(0, params.deblockDenoise)) / 100;
+  if (dn > 0.05) {
+    stages.push(
+      `hqdn3d=${(dn * 3.2).toFixed(2)}:${(dn * 2.4).toFixed(2)}:${(dn * 4.0).toFixed(2)}:${(dn * 3.0).toFixed(2)}`
+    );
+  }
+
+  const sharpNorm = Math.min(100, Math.max(0, params.sharpness)) / 100;
+  if (sharpNorm > 0.02) {
+    const casStrength = Number(Math.min(0.95, Math.max(0.05, sharpNorm)).toFixed(2));
+    stages.push(`cas=${casStrength}`);
+  }
+
+  const contrast = Number((1 + (Math.min(100, Math.max(0, params.microContrast)) / 100) * 0.16).toFixed(2));
+  const saturation = Number(Math.max(0.5, 1 + (Math.min(50, Math.max(-50, params.vibrance)) / 100) * 0.45).toFixed(2));
+  const bright = Number(((Math.min(30, Math.max(-30, params.brightness)) / 100) * 0.12).toFixed(3));
+  const gamma = Number((1 + Math.max(0, params.brightness / 100) * 0.15).toFixed(2));
+  stages.push(`eq=contrast=${contrast}:saturation=${saturation}:brightness=${bright}:gamma=${gamma}`);
+
+  const fps =
+    params.effectiveFps === 120 ? 120 : params.effectiveFps === 60 ? 60 : 30;
+  stages.push(`fps=${fps}`);
+  stages.push('format=yuv420p');
+
+  return stages.join(',');
+}
+

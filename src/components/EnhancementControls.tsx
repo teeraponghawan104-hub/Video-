@@ -6,6 +6,8 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
+  Loader2,
+  Square,
 } from 'lucide-react';
 import {
   ENHANCEMENT_PROFILES,
@@ -18,6 +20,7 @@ import {
   ScaleMultiplier,
   validateCustomPresetName,
 } from '../utils/upscaleEngine';
+import { ExportProgressInfo } from '../utils/videoExporter';
 
 interface EnhancementControlsProps {
   activePreset: PlatformPreset;
@@ -27,8 +30,10 @@ interface EnhancementControlsProps {
   onResetSettings: () => void;
   metrics: OutputMetrics;
   onStartImmediateExport: () => void;
+  onStopExportEarly: () => void;
   onAddToQueue: () => void;
   isExportingNow: boolean;
+  exportProgress: ExportProgressInfo | null;
 }
 
 const SIMPLE_PROFILE_LABELS: Record<string, { title: string; desc: string }> = {
@@ -58,8 +63,10 @@ export const EnhancementControls: React.FC<EnhancementControlsProps> = ({
   onResetSettings,
   metrics,
   onStartImmediateExport,
+  onStopExportEarly,
   onAddToQueue,
   isExportingNow,
+  exportProgress,
 }) => {
   const [customProfiles, setCustomProfiles] = useState<EnhancementProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState<string>('tiktok_ultra_crisp');
@@ -377,30 +384,60 @@ export const EnhancementControls: React.FC<EnhancementControlsProps> = ({
         </section>
       </div>
 
-      {/* Clean Bottom CTA Area */}
+      {/* Clean Bottom CTA Area with Live Full-Duration Render Progress */}
       <div className="p-5 bg-[#0A0E17] border-t border-slate-800/80 space-y-2.5">
-        <button
-          type="button"
-          disabled={isExportingNow}
-          onClick={onStartImmediateExport}
-          className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-slate-950 bg-orange-500 hover:bg-orange-400 disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-orange-500/10"
-        >
-          <Download className="w-4 h-4" />
-          <span>
-            {isExportingNow
-              ? 'กำลังอัพสเกลวิดีโอ...'
-              : `อัพสเกลและดาวน์โหลด (${metrics.outputWidth}×${metrics.outputHeight})`}
-          </span>
-        </button>
+        {isExportingNow && exportProgress ? (
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-mono tabular-nums">
+              <span className="inline-flex items-center gap-1.5 text-orange-400 font-semibold">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                กำลังเรนเดอร์เต็มจอ ({exportProgress.progressPct}%)
+              </span>
+              <span className="text-slate-400">
+                {exportProgress.currentTimeSec.toFixed(1)}s / {exportProgress.totalDurationSec.toFixed(1)}s
+              </span>
+            </div>
 
-        <button
-          type="button"
-          onClick={onAddToQueue}
-          className="w-full inline-flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap shrink-0"
-        >
-          <ListPlus className="w-3.5 h-3.5" />
-          <span>เพิ่มเข้าคิวเพื่อทำหลายไฟล์พร้อมกัน</span>
-        </button>
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                style={{ width: `${exportProgress.progressPct}%` }}
+                className="h-full bg-orange-500 transition-all duration-150"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={onStopExportEarly}
+              className="w-full min-h-[40px] inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer"
+            >
+              <Square className="w-3.5 h-3.5 text-orange-400 fill-orange-400" />
+              <span>บันทึกไฟล์ถึงวินาทีนี้ทันที</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={isExportingNow}
+              onClick={onStartImmediateExport}
+              className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-slate-950 bg-orange-500 hover:bg-orange-400 disabled:opacity-60 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-orange-500/10"
+            >
+              <Download className="w-4 h-4" />
+              <span>
+                อัพสเกลและดาวน์โหลด ({metrics.outputWidth}×{metrics.outputHeight})
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onAddToQueue}
+              className="w-full inline-flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap shrink-0"
+            >
+              <ListPlus className="w-3.5 h-3.5" />
+              <span>เพิ่มเข้าคิวเพื่อทำหลายไฟล์พร้อมกัน</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

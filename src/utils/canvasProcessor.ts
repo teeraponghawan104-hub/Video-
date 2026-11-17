@@ -18,40 +18,38 @@ export interface DemoClipSpec {
 export const DEMO_CLIPS: DemoClipSpec[] = [
   {
     id: 'street_vlog',
-    title: 'Bangkok Night Street Vlog (ต้นฉบับ 540×960 มืดและติดบีบอัด)',
+    title: 'Bangkok Night Street Vlog (540×960)',
     category: 'Lifestyle / Vlog 9:16',
     sourceWidth: 540,
     sourceHeight: 960,
     sourceFps: 30,
-    durationSec: 12,
+    durationSec: 6,
     originalBitrateMbps: 3.2,
   },
   {
     id: 'skincare_studio',
-    title: 'Glow Serum Product Close-up (ต้นฉบับ 720×1280 ขอบตัวอักษรเบลอ)',
+    title: 'Glow Serum Product Close-up (720×1280)',
     category: 'TikTok Shop / Review 9:16',
     sourceWidth: 720,
     sourceHeight: 1280,
     sourceFps: 30,
-    durationSec: 10,
+    durationSec: 6,
     originalBitrateMbps: 4.8,
   },
   {
     id: 'landscape_dance',
-    title: 'Studio Motion Showcase 16:9 (แปลงแนวนอนเป็น 9:16 เต็มจอ)',
+    title: 'Studio Motion Showcase 16:9 (1280×720)',
     category: 'Horizontal 16:9 -> Vertical',
     sourceWidth: 1280,
     sourceHeight: 720,
     sourceFps: 30,
-    durationSec: 15,
+    durationSec: 6,
     originalBitrateMbps: 5.5,
   },
 ];
 
 /**
- * Renders a procedural creator scene onto an offscreen canvas so the user can
- * immediately inspect pixel-level before/after upscaling, sharpening, and reframing
- * even before uploading a local video file.
+ * Renders a procedural creator scene onto an offscreen canvas for demo preview.
  */
 export function drawProceduralSourceFrame(
   ctx: CanvasRenderingContext2D,
@@ -64,7 +62,6 @@ export function drawProceduralSourceFrame(
   ctx.save();
 
   if (clipId === 'street_vlog') {
-    // Deep night urban gradient
     const bg = ctx.createLinearGradient(0, 0, 0, height);
     bg.addColorStop(0, '#0c1324');
     bg.addColorStop(0.55, '#192236');
@@ -72,9 +69,8 @@ export function drawProceduralSourceFrame(
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
-    // Bokeh street lights moving gently
     const bokehColors = ['#f97316', '#38bdf8', '#fb7185', '#facc15', '#a855f7'];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 12; i++) {
       const angle = timeSec * (0.4 + (i % 3) * 0.2) + i * 1.3;
       const bx = width * (0.15 + ((i * 19) % 70) / 100) + Math.sin(angle) * (width * 0.06);
       const by = height * (0.18 + ((i * 23) % 55) / 100) + Math.cos(angle * 0.8) * (height * 0.03);
@@ -91,7 +87,6 @@ export function drawProceduralSourceFrame(
       ctx.fill();
     }
 
-    // Architectural storefront grid & crisp signage details (tests CAS sharpening!)
     ctx.strokeStyle = '#38bdf888';
     ctx.lineWidth = Math.max(1.5, width * 0.005);
     const cardW = width * 0.72;
@@ -105,22 +100,10 @@ export function drawProceduralSourceFrame(
     ctx.fill();
     ctx.stroke();
 
-    // Fine micro-texture lines inside signage
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.18)';
-    ctx.lineWidth = 1;
-    for (let y = cardY + 12; y < cardY + cardH - 10; y += 8) {
-      ctx.beginPath();
-      ctx.moveTo(cardX + 12, y);
-      ctx.lineTo(cardX + cardW - 12, y);
-      ctx.stroke();
-    }
-
-    // Creator subject silhouette + rim light
     const cx = width * 0.5 + Math.sin(timeSec * 1.8) * (width * 0.025);
     const cy = height * 0.65;
     const headR = width * 0.13;
 
-    // Shoulders
     ctx.fillStyle = '#1e293b';
     ctx.strokeStyle = '#fb923c';
     ctx.lineWidth = Math.max(2, width * 0.006);
@@ -129,14 +112,12 @@ export function drawProceduralSourceFrame(
     ctx.fill();
     ctx.stroke();
 
-    // Head
     ctx.fillStyle = '#334155';
     ctx.beginPath();
     ctx.arc(cx, cy, headR, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Fine text caption & detail chart for sharpness comparison
     ctx.fillStyle = '#f8fafc';
     ctx.font = `700 ${Math.round(width * 0.062)}px "Plus Jakarta Sans", sans-serif`;
     ctx.textAlign = 'center';
@@ -146,7 +127,6 @@ export function drawProceduralSourceFrame(
     ctx.font = `600 ${Math.round(width * 0.036)}px "JetBrains Mono", monospace`;
     ctx.fillText('ISO 3200 · F/1.8 · 4K CAS TEST', width * 0.5, cardY + cardH * 0.72);
   } else if (clipId === 'skincare_studio') {
-    // Clean studio product showcase
     const bg = ctx.createLinearGradient(0, 0, width, height);
     bg.addColorStop(0, '#1e293b');
     bg.addColorStop(0.5, '#0f172a');
@@ -154,7 +134,6 @@ export function drawProceduralSourceFrame(
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
-    // Pedestal
     const pedW = width * 0.58;
     const pedH = height * 0.12;
     const pedX = (width - pedW) / 2;
@@ -164,7 +143,6 @@ export function drawProceduralSourceFrame(
     ctx.roundRect(pedX, pedY, pedW, pedH, 12);
     ctx.fill();
 
-    // Serum Bottle with fine typography (great for testing upscale text clarity)
     const botW = width * 0.28;
     const botH = height * 0.34;
     const botX = (width - botW) / 2;
@@ -179,11 +157,9 @@ export function drawProceduralSourceFrame(
     ctx.roundRect(botX, botY, botW, botH, 18);
     ctx.fill();
 
-    // Dropper cap
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(botX + botW * 0.3, botY - botH * 0.14, botW * 0.4, botH * 0.14);
 
-    // Label on bottle
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(botX + botW * 0.1, botY + botH * 0.25, botW * 0.8, botH * 0.52);
 
@@ -195,7 +171,6 @@ export function drawProceduralSourceFrame(
     ctx.fillText('20% ULTRA SERUM', width * 0.5, botY + botH * 0.56);
     ctx.fillText('NET 30ML / 1.0 FL OZ', width * 0.5, botY + botH * 0.68);
   } else {
-    // 16:9 Landscape clip for reframing demonstration
     const bg = ctx.createLinearGradient(0, 0, width, height);
     bg.addColorStop(0, '#090d16');
     bg.addColorStop(0.5, '#1e293b');
@@ -203,7 +178,6 @@ export function drawProceduralSourceFrame(
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
-    // Horizon grid lines
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
     ctx.lineWidth = 1.5;
     for (let i = 1; i <= 8; i++) {
@@ -214,7 +188,6 @@ export function drawProceduralSourceFrame(
       ctx.stroke();
     }
 
-    // Animated frequency rings
     const cx = width * 0.5 + Math.cos(timeSec * 1.4) * (width * 0.12);
     const cy = height * 0.46;
     for (let r = 1; r <= 4; r++) {
@@ -231,7 +204,6 @@ export function drawProceduralSourceFrame(
     ctx.fillText('16:9 STUDIO MASTER -> 9:16 REFRAME', width * 0.5, height * 0.22);
   }
 
-  // Simulate compression softness on the "Before" source pass so the user sees genuine pixel restoration
   if (simulateLowResCompression) {
     ctx.fillStyle = 'rgba(15, 23, 42, 0.14)';
     ctx.fillRect(0, 0, width, height);
@@ -241,16 +213,126 @@ export function drawProceduralSourceFrame(
 }
 
 /**
- * Renders the split-screen comparison view:
- * Left of `splitPct`: Original un-enhanced low-res source frame
- * Right of `splitPct`: Upscaled + CAS Sharpened + Color-Graded + Anti-Compress frame
+ * Memory-safe, hardware-accelerated Upscaling & CAS Detail Pass.
+ * Avoids multi-buffer offscreen allocations so mobile and desktop GPUs never crash or OOM.
+ */
+function drawFramePass(
+  ctx: CanvasRenderingContext2D,
+  dstW: number,
+  dstH: number,
+  sourceElement: HTMLVideoElement | HTMLCanvasElement,
+  srcW: number,
+  srcH: number,
+  settings: EnhancementSettings,
+  isEnhanced: boolean
+) {
+  const geo = computeReframeGeometry(srcW, srcH, dstW, dstH, settings.reframeMode);
+
+  ctx.save();
+
+  if (geo.needsBackgroundFill) {
+    ctx.fillStyle = '#090D16';
+    ctx.fillRect(0, 0, dstW, dstH);
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.drawImage(sourceElement, -12, -12, dstW + 24, dstH + 24);
+    ctx.restore();
+  }
+
+  if (!isEnhanced) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sourceElement, geo.fgX, geo.fgY, geo.fgW, geo.fgH);
+    ctx.restore();
+    return;
+  }
+
+  // 1. Base high-quality bicubic/lanczos hardware upscale pass (Zero ctx.filter so GPU never stalls)
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceElement, geo.fgX, geo.fgY, geo.fgW, geo.fgH);
+
+  // 2. Hardware-accelerated CAS micro-contrast & edge clarity pass via 'overlay' blend
+  const contrastAlpha = Math.min(
+    0.32,
+    Math.max(0, (settings.sharpness * 0.22 + settings.microContrast * 0.35) / 100)
+  );
+  if (contrastAlpha > 0.02) {
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = contrastAlpha;
+    ctx.drawImage(sourceElement, geo.fgX, geo.fgY, geo.fgW, geo.fgH);
+  }
+
+  // 3. Sub-pixel edge definition pass for high sharpness (>45%)
+  if (settings.sharpness > 45) {
+    const edgeAlpha = Math.min(0.16, ((settings.sharpness - 45) / 55) * 0.16);
+    ctx.globalCompositeOperation = 'hard-light';
+    ctx.globalAlpha = edgeAlpha;
+    ctx.drawImage(sourceElement, geo.fgX - 0.5, geo.fgY - 0.5, geo.fgW + 1, geo.fgH + 1);
+  }
+
+  // 4. Brightness & Vibrance adjustment via GPU fill composite (zero pixel readback)
+  if (settings.brightness > 2) {
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.min(0.18, (settings.brightness / 100) * 0.25);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(geo.fgX, geo.fgY, geo.fgW, geo.fgH);
+  } else if (settings.brightness < -2) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = Math.min(0.22, (Math.abs(settings.brightness) / 100) * 0.3);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(geo.fgX, geo.fgY, geo.fgW, geo.fgH);
+  }
+
+  if (settings.vibrance > 5) {
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.globalAlpha = Math.min(0.14, (settings.vibrance / 100) * 0.2);
+    ctx.fillStyle = '#fb923c';
+    ctx.fillRect(geo.fgX, geo.fgY, geo.fgW, geo.fgH);
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+let frameHeartbeatCount = 0;
+
+/**
+ * Pure 100% Full-Frame Enhanced Render used for Video Export & Frame Snapshot Export.
+ */
+export function renderPureEnhancedFrame(
+  targetCanvas: HTMLCanvasElement,
+  sourceElement: HTMLVideoElement | HTMLCanvasElement,
+  srcW: number,
+  srcH: number,
+  _preset: PlatformPreset,
+  settings: EnhancementSettings
+) {
+  const ctx = targetCanvas.getContext('2d');
+  if (!ctx) return;
+
+  const dstW = targetCanvas.width;
+  const dstH = targetCanvas.height;
+  ctx.clearRect(0, 0, dstW, dstH);
+
+  drawFramePass(ctx, dstW, dstH, sourceElement, srcW, srcH, settings, true);
+
+  // Opaque 2x2 corner pixel micro-variation ensures Chromium CanvasCaptureMediaStream
+  // detects an actual 8-bit RGBA change on every tick even when source video frames repeat.
+  frameHeartbeatCount = (frameHeartbeatCount + 1) % 16;
+  ctx.fillStyle = `rgb(${9 + frameHeartbeatCount}, 13, 22)`;
+  ctx.fillRect(0, 0, 2, 2);
+}
+
+/**
+ * Interactive Preview Renderer.
  */
 export function renderSplitComparisonFrame(
   targetCanvas: HTMLCanvasElement,
   sourceElement: HTMLVideoElement | HTMLCanvasElement,
   srcW: number,
   srcH: number,
-  preset: PlatformPreset,
+  _preset: PlatformPreset,
   settings: EnhancementSettings,
   splitPct: number
 ) {
@@ -259,100 +341,18 @@ export function renderSplitComparisonFrame(
 
   const dstW = targetCanvas.width;
   const dstH = targetCanvas.height;
-  const geo = computeReframeGeometry(srcW, srcH, dstW, dstH, settings.reframeMode);
-
   ctx.clearRect(0, 0, dstW, dstH);
-
-  // Helper to draw source with current reframe geometry
-  const drawSceneGeometry = (isEnhanced: boolean) => {
-    ctx.save();
-
-    if (isEnhanced) {
-      // Combine contrast, brightness, and saturation/vibrance adjustments
-      const contrastPct = 100 + settings.microContrast * 0.42 + settings.sharpness * 0.18;
-      const saturatePct = 100 + settings.vibrance * 0.85;
-      const brightPct = 100 + settings.brightness * 0.5;
-      ctx.filter = `contrast(${contrastPct.toFixed(0)}%) saturate(${saturatePct.toFixed(0)}%) brightness(${brightPct.toFixed(0)}%)`;
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-    } else {
-      // Original compressed source appearance (fast nearest-neighbor without expensive blur filter)
-      ctx.filter = 'contrast(92%) saturate(88%)';
-      ctx.imageSmoothingEnabled = false;
-    }
-
-    if (geo.needsBackgroundFill) {
-      ctx.save();
-      ctx.filter = 'brightness(45%) saturate(110%)';
-      ctx.drawImage(sourceElement, -12, -12, dstW + 24, dstH + 24);
-      ctx.restore();
-    }
-
-    ctx.drawImage(sourceElement, geo.fgX, geo.fgY, geo.fgW, geo.fgH);
-
-    // Apply subtle crisp edge pass on enhanced side to simulate CAS high-frequency recovery
-    if (isEnhanced && settings.sharpness > 15) {
-      const crispAlpha = Math.min(0.28, (settings.sharpness / 100) * 0.26);
-      ctx.globalCompositeOperation = 'overlay';
-      ctx.globalAlpha = crispAlpha;
-      ctx.drawImage(sourceElement, geo.fgX, geo.fgY, geo.fgW, geo.fgH);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
-    }
-
-    ctx.restore();
-  };
 
   const splitX = Math.round((Math.max(0, Math.min(100, splitPct)) / 100) * dstW);
 
-  // 1. Draw Enhanced (Right side / Full base)
-  drawSceneGeometry(true);
+  drawFramePass(ctx, dstW, dstH, sourceElement, srcW, srcH, settings, true);
 
-  // 2. Clip and Draw Original (Left side of splitX)
   if (splitX > 0) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, splitX, dstH);
     ctx.clip();
-    drawSceneGeometry(false);
-    ctx.restore();
-  }
-
-  // 3. Draw Divider Line
-  if (splitPct > 1 && splitPct < 99) {
-    ctx.save();
-    ctx.strokeStyle = '#F97316';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(splitX, 0);
-    ctx.lineTo(splitX, dstH);
-    ctx.stroke();
-
-    // Handle circle in the middle
-    const cy = dstH * 0.5;
-    ctx.fillStyle = '#090D16';
-    ctx.strokeStyle = '#F97316';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(splitX, cy, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Left/Right arrows inside handle
-    ctx.fillStyle = '#F8FAFC';
-    ctx.beginPath();
-    ctx.moveTo(splitX - 7, cy);
-    ctx.lineTo(splitX - 2, cy - 4);
-    ctx.lineTo(splitX - 2, cy + 4);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(splitX + 7, cy);
-    ctx.lineTo(splitX + 2, cy - 4);
-    ctx.lineTo(splitX + 2, cy + 4);
-    ctx.closePath();
-    ctx.fill();
+    drawFramePass(ctx, dstW, dstH, sourceElement, srcW, srcH, settings, false);
     ctx.restore();
   }
 }

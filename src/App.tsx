@@ -1,522 +1,323 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  DEFAULT_ENHANCEMENT_SETTINGS,
-  EnhancementSettings,
-  PLATFORM_PRESETS,
-  PlatformPreset,
-  calculateOutputMetrics,
-} from './utils/upscaleEngine';
-import { DEMO_CLIPS, DemoClipSpec } from './utils/canvasProcessor';
-import { VideoPreviewStage } from './components/VideoPreviewStage';
-import { EnhancementControls } from './components/EnhancementControls';
-import { RenderJob, RenderQueuePanel } from './components/RenderQueuePanel';
+import React, { useEffect, useState } from 'react';
+import { PLATFORM_PRESETS, PlatformPreset } from './utils/upscaleEngine';
+import { BareetOptimizerView } from './components/BareetOptimizerView';
+import { TikTokAnalyzerView } from './components/TikTokAnalyzerView';
 import { PlatformGuideSection } from './components/PlatformGuideSection';
 import { AppLogoIcon } from './components/AppLogoIcon';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { usePWAInstall } from './utils/usePWAInstall';
-import {
-  CheckCircle2,
-  Download,
-  X,
-  Sparkles,
-  FolderDown,
-  Sliders,
-  Smartphone,
-} from 'lucide-react';
 
-type ActiveTab = 'studio' | 'queue' | 'specs';
+type ActiveTab = 'optimizer' | 'analyzer' | 'guide';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('studio');
-  const [activePreset, setActivePreset] = useState<PlatformPreset>(PLATFORM_PRESETS[0]);
-  const [settings, setSettings] = useState<EnhancementSettings>(DEFAULT_ENHANCEMENT_SETTINGS);
-  const [selectedDemoClip, setSelectedDemoClip] = useState<DemoClipSpec>(DEMO_CLIPS[0]);
-
-  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
-  const [uploadedVideoName, setUploadedVideoName] = useState<string | null>(null);
-
-  const [sourceDims, setSourceDims] = useState({
-    width: DEMO_CLIPS[0].sourceWidth,
-    height: DEMO_CLIPS[0].sourceHeight,
-    durationSec: DEMO_CLIPS[0].durationSec,
-  });
-
-  const [isExportingNow, setIsExportingNow] = useState(false);
-  const [showInstallModal, setShowInstallModal] = useState(false);
-  const [bannerNotice, setBannerNotice] = useState<{
-    title: string;
-    subtitle: string;
-    downloadUrl?: string;
-    downloadName?: string;
-  } | null>(null);
-
-  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  const [renderJobs, setRenderJobs] = useState<RenderJob[]>([
-    {
-      id: 'seed-job-1',
-      clipTitle: 'Bangkok Night Street Vlog (540p → 1080p60)',
-      platformName: 'TikTok 1080p60 Anti-Compress',
-      platformLabel: 'TikTok',
-      resolution: '1080×1920',
-      fps: 60,
-      bitrateMbps: 16.5,
-      estimatedSizeMb: 24.8,
-      casSharpness: 68,
-      status: 'completed',
-      progressPct: 100,
-      createdAt: 'เมื่อสักครู่',
-      downloadUrl: 'data:text/plain;charset=utf-8,KrispScale-TikTok-1080p60-Export-Manifest',
-      downloadFilename: 'Bangkok_Night_Vlog_TikTok_1080p60.webm',
-    },
-  ]);
-
-  const metrics = useMemo(
-    () =>
-      calculateOutputMetrics(
-        sourceDims.width,
-        sourceDims.height,
-        sourceDims.durationSec,
-        activePreset,
-        settings
-      ),
-    [sourceDims, activePreset, settings]
+  const [activeTab, setActiveTab] = useState<ActiveTab>('optimizer');
+  const [activePreset, setActivePreset] = useState<PlatformPreset>(
+    PLATFORM_PRESETS[0]
   );
+  const [showAnnouncement, setShowAnnouncement] = useState<boolean>(true);
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
 
-  const handleUpdateSettings = useCallback((patch: Partial<EnhancementSettings>) => {
-    setSettings((prev) => ({ ...prev, ...patch }));
+  const { isInstallable, isIOS, install } = usePWAInstall();
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => {
+          for (const reg of registrations) {
+            reg.unregister().catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
-
-  const handleResetSettings = useCallback(() => {
-    setSettings(DEFAULT_ENHANCEMENT_SETTINGS);
-  }, []);
-
-  const handleSourceDimensionsChange = useCallback(
-    (width: number, height: number, durationSec: number) => {
-      setSourceDims((prev) => {
-        if (
-          prev.width === width &&
-          prev.height === height &&
-          prev.durationSec === durationSec
-        ) {
-          return prev;
-        }
-        return { width, height, durationSec };
-      });
-    },
-    []
-  );
-
-  const handleUploadVideo = (file: File) => {
-    if (uploadedVideoUrl) {
-      URL.revokeObjectURL(uploadedVideoUrl);
-    }
-    const url = URL.createObjectURL(file);
-    setUploadedVideoUrl(url);
-    setUploadedVideoName(file.name);
-  };
-
-  const handleClearUploadedVideo = () => {
-    if (uploadedVideoUrl) {
-      URL.revokeObjectURL(uploadedVideoUrl);
-    }
-    setUploadedVideoUrl(null);
-    setUploadedVideoName(null);
-  };
-
-  const createCanvasExportBlobUrl = async (): Promise<{
-    url: string;
-    ext: string;
-  }> => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return {
-        url: 'data:text/plain;charset=utf-8,KrispScale-Export',
-        ext: 'webm',
-      };
-    }
-
-    if (typeof MediaRecorder !== 'undefined' && typeof canvas.captureStream === 'function') {
-      try {
-        const stream = canvas.captureStream(60);
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-          ? 'video/webm;codecs=vp9'
-          : 'video/webm';
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: Math.round(metrics.targetBitrateMbps * 1_000_000),
-        });
-        const chunks: BlobPart[] = [];
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
-
-        const blobPromise = new Promise<Blob>((resolve) => {
-          recorder.onstop = () => {
-            resolve(new Blob(chunks, { type: mimeType }));
-          };
-        });
-
-        recorder.start();
-        await new Promise((r) => setTimeout(r, 700));
-        recorder.stop();
-        const blob = await blobPromise;
-        if (blob.size > 0) {
-          return { url: URL.createObjectURL(blob), ext: 'webm' };
-        }
-      } catch {
-        // Fallback to PNG below
-      }
-    }
-
-    return {
-      url: canvas.toDataURL('image/png'),
-      ext: 'png',
-    };
-  };
-
-  const handleCaptureSnapshot = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    const filename = `KrispScale_${activePreset.platformLabel}_${metrics.outputWidth}x${metrics.outputHeight}.png`;
-
-    setBannerNotice({
-      title: `บันทึกภาพเฟรมคมชัดสูง ${metrics.outputWidth}×${metrics.outputHeight} สำเร็จ`,
-      subtitle: `ความคมชัด ${settings.sharpness}% สำหรับ ${activePreset.platformLabel}`,
-      downloadUrl: dataUrl,
-      downloadName: filename,
-    });
-  };
-
-  const handleAddToQueue = () => {
-    const clipLabel = uploadedVideoName || selectedDemoClip.title;
-    const newJob: RenderJob = {
-      id: `job-${Date.now()}`,
-      clipTitle: clipLabel,
-      platformName: activePreset.name,
-      platformLabel: activePreset.platformLabel,
-      resolution: `${metrics.outputWidth}×${metrics.outputHeight}`,
-      fps: metrics.effectiveFps,
-      bitrateMbps: metrics.targetBitrateMbps,
-      estimatedSizeMb: metrics.estimatedFileSizeMb,
-      casSharpness: settings.sharpness,
-      status: 'queued',
-      progressPct: 0,
-      createdAt: 'เมื่อสักครู่',
-    };
-
-    setRenderJobs((prev) => [newJob, ...prev]);
-    setBannerNotice({
-      title: 'เพิ่มลงคิวไฟล์เรียบร้อยแล้ว',
-      subtitle: `${activePreset.platformLabel} (${metrics.outputWidth}×${metrics.outputHeight})`,
-    });
-  };
-
-  const runJobSimulationAndExport = async (jobId: string) => {
-    setRenderJobs((prev) =>
-      prev.map((j) =>
-        j.id === jobId ? { ...j, status: 'processing', progressPct: 25 } : j
-      )
-    );
-
-    await new Promise((r) => setTimeout(r, 200));
-    setRenderJobs((prev) =>
-      prev.map((j) => (j.id === jobId ? { ...j, progressPct: 70 } : j))
-    );
-
-    const exported = await createCanvasExportBlobUrl();
-    const safePlatform = activePreset.platformLabel.replace(/\s+/g, '_');
-    const filename = `KrispScale_${safePlatform}_${metrics.outputWidth}x${metrics.outputHeight}_${metrics.effectiveFps}fps.${exported.ext}`;
-
-    setRenderJobs((prev) =>
-      prev.map((j) =>
-        j.id === jobId
-          ? {
-              ...j,
-              status: 'completed',
-              progressPct: 100,
-              downloadUrl: exported.url,
-              downloadFilename: filename,
-            }
-          : j
-      )
-    );
-
-    return { url: exported.url, filename };
-  };
-
-  const handleStartImmediateExport = async () => {
-    if (isExportingNow) return;
-    setIsExportingNow(true);
-
-    const clipLabel = uploadedVideoName || selectedDemoClip.title;
-    const newJobId = `job-${Date.now()}`;
-    const newJob: RenderJob = {
-      id: newJobId,
-      clipTitle: clipLabel,
-      platformName: activePreset.name,
-      platformLabel: activePreset.platformLabel,
-      resolution: `${metrics.outputWidth}×${metrics.outputHeight}`,
-      fps: metrics.effectiveFps,
-      bitrateMbps: metrics.targetBitrateMbps,
-      estimatedSizeMb: metrics.estimatedFileSizeMb,
-      casSharpness: settings.sharpness,
-      status: 'processing',
-      progressPct: 15,
-      createdAt: 'เมื่อสักครู่',
-    };
-
-    setRenderJobs((prev) => [newJob, ...prev]);
-
-    const { url, filename } = await runJobSimulationAndExport(newJobId);
-    setIsExportingNow(false);
-
-    setBannerNotice({
-      title: `อัพสเกลวิดีโอ ${metrics.outputWidth}×${metrics.outputHeight} เสร็จเรียบร้อย`,
-      subtitle: `พร้อมโพสต์ลง ${activePreset.platformLabel} โดยไม่ถูกบีบอัดซ้ำ`,
-      downloadUrl: url,
-      downloadName: filename,
-    });
-  };
-
-  const handleProcessAllQueued = async () => {
-    const queuedIds = renderJobs.filter((j) => j.status === 'queued').map((j) => j.id);
-    for (const id of queuedIds) {
-      await runJobSimulationAndExport(id);
-    }
-  };
-
-  const handleRemoveJob = (id: string) => {
-    setRenderJobs((prev) => prev.filter((j) => j.id !== id));
-  };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#080B12] text-slate-100 pb-16 md:pb-0">
-      {/* Strict 3-Zone Top Bar Contract — Recognizable App Icon + Nav + Primary Action */}
-      <header className="h-12 md:h-14 flex items-center justify-between gap-4 md:gap-8 px-4 sm:px-6 bg-[#0B0F19]/95 backdrop-blur-md border-b border-slate-800/70 sticky top-0 z-30">
-        {/* Zone 1: App Icon + Brand Wordmark */}
-        <a
-          href="#studio"
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveTab('studio');
-          }}
-          className="inline-flex items-center gap-2.5 text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
-        >
-          <AppLogoIcon className="w-7 h-7 sm:w-8 sm:h-8 shrink-0 rounded-lg shadow-md" />
-          <span>KrispScale</span>
-        </a>
+    <div className="relative min-h-screen flex flex-col bg-[#07080F] text-zinc-100 pb-16 md:pb-0">
+      {/* Subtle Top Radial Signal Glow (matches bareet.dev backdrop) */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-x-0 -top-40 z-0 h-96 bg-[radial-gradient(ellipse_70%_50%_at_50%_0%,rgba(14,165,233,0.14),transparent)]"
+      />
 
-        {/* Zone 2: Desktop Navigation Links */}
-        <nav aria-label="เมนูหลัก" className="hidden md:flex items-center gap-6 text-sm font-medium">
-          <button
-            type="button"
-            onClick={() => setActiveTab('studio')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
-              activeTab === 'studio'
-                ? 'text-white underline underline-offset-8 decoration-orange-500 decoration-2'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            อัพสเกลวิดีโอ
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('queue')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
-              activeTab === 'queue'
-                ? 'text-white underline underline-offset-8 decoration-orange-500 decoration-2'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            ไฟล์ที่ส่งออก ({renderJobs.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('specs')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
-              activeTab === 'specs'
-                ? 'text-white underline underline-offset-8 decoration-orange-500 decoration-2'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            ตารางบิตเรต TikTok
-          </button>
-          {!isInstalled && (
+      {/* 3-Zone Top Bar Contract (matches bareet.dev header) */}
+      <header className="sticky top-0 z-30 border-b border-[#12152A] bg-[#07080F]/90 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+          {/* Zone 1: Brand + Primary Navigation */}
+          <div className="flex items-center gap-6">
+            <a
+              href="#top"
+              onClick={(e) => {
+                e.preventDefault();
+                setActiveTab('optimizer');
+              }}
+              className="inline-flex items-center gap-2.5 text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
+            >
+              <AppLogoIcon className="h-8 w-8 shrink-0 rounded-xl shadow-md" />
+              <span>Bareet Method</span>
+            </a>
+
+            <nav
+              aria-label="เมนูหลัก"
+              className="hidden md:flex items-center gap-1 text-sm"
+            >
+              <button
+                type="button"
+                onClick={() => setActiveTab('optimizer')}
+                className={`rounded-lg px-3 py-1.5 font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'optimizer'
+                    ? 'bg-[#12152A] text-white'
+                    : 'text-zinc-400 hover:bg-[#0B0D18] hover:text-zinc-200'
+                }`}
+              >
+                หน้าแรก
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('analyzer')}
+                className={`rounded-lg px-3 py-1.5 font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'analyzer'
+                    ? 'bg-[#12152A] text-white'
+                    : 'text-zinc-400 hover:bg-[#0B0D18] hover:text-zinc-200'
+                }`}
+              >
+                วิเคราะห์
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('guide')}
+                className={`rounded-lg px-3 py-1.5 font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'guide'
+                    ? 'bg-[#12152A] text-white'
+                    : 'text-zinc-400 hover:bg-[#0B0D18] hover:text-zinc-200'
+                }`}
+              >
+                วิธีใช้ & ตารางบิตเรต
+              </button>
+            </nav>
+          </div>
+
+          {/* Zone 3: Right Action Control */}
+          <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={() => setShowInstallModal(true)}
-              className="text-slate-400 hover:text-orange-400 transition-colors whitespace-nowrap shrink-0 pb-0.5 cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[#1B2040] bg-[#0B0D18] px-3.5 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:border-[#0EA5E9]/50 hover:bg-[#12152A] hover:text-white whitespace-nowrap shrink-0"
             >
-              ติดตั้งแอป
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+              >
+                <rect x="6" y="2" width="12" height="20" rx="2" />
+                <path d="M12 18h.01" strokeLinecap="round" />
+              </svg>
+              <span>ติดตั้งแอป</span>
             </button>
-          )}
-        </nav>
-
-        {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center shrink-0">
-          <button
-            type="button"
-            onClick={handleStartImmediateExport}
-            disabled={isExportingNow}
-            className="min-h-[36px] px-3.5 sm:px-4 py-1.5 text-xs font-semibold text-slate-950 bg-orange-500 hover:bg-orange-400 disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {isExportingNow ? 'กำลังเรนเดอร์...' : 'ส่งออกวิดีโอ HD'}
-          </button>
+          </div>
         </div>
       </header>
 
-      {/* Main Content Container */}
-      <main className="flex-1 max-w-[1320px] w-full mx-auto px-3.5 sm:px-6 py-4 sm:py-6 space-y-4">
-        {/* Notification Banner when Export / Snapshot completes */}
-        {bannerNotice && (
-          <div
-            role="status"
-            className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-xl bg-emerald-950/50 border border-emerald-500/40 text-emerald-100"
-          >
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <div className="text-xs sm:text-sm">
-                <span className="font-semibold">{bannerNotice.title}</span>
-                <span className="text-emerald-300/80 ml-2">{bannerNotice.subtitle}</span>
-              </div>
+      {/* Emerald Patch Status Announcement Bar (matches bareet.dev announcement strip) */}
+      {showAnnouncement && (
+        <div className="relative z-10 border-b border-emerald-900/40 bg-gradient-to-r from-emerald-950/60 via-emerald-950/35 to-[#07080F] px-4 py-2.5">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 text-xs sm:text-sm">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30">
+                ✓
+              </span>
+              <span className="truncate font-medium text-emerald-100">
+                ระบบแพตช์ใหม่ Bareet Engine (v10 / v17) เปิดใช้งานแล้ว — ปรับวิดีโอในเบราว์เซอร์ ไม่ re-encode ภาพคมเท่าต้นฉบับ
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              {bannerNotice.downloadUrl && (
-                <a
-                  href={bannerNotice.downloadUrl}
-                  download={bannerNotice.downloadName || 'krispscale-output.webm'}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-400 text-slate-950 rounded-lg hover:bg-emerald-300 transition-colors whitespace-nowrap shrink-0"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>ดาวน์โหลดไฟล์</span>
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={() => setBannerNotice(null)}
-                aria-label="ปิดการแจ้งเตือน"
-                className="p-1 text-emerald-300 hover:text-white rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowAnnouncement(false)}
+              aria-label="ปิดประกาศ"
+              className="shrink-0 rounded-lg p-1 text-zinc-400 transition-colors hover:bg-[#12152A] hover:text-zinc-200"
+            >
+              ✕
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* TAB 1: Minimalist 2-Column Studio Workspace (Adapts seamlessly from 390px iOS/Android to 1440px PC) */}
-        {activeTab === 'studio' && (
-          <section
-            id="studio-workspace"
-            aria-label="พื้นที่อัพสเกลวิดีโอ"
-            className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch"
-          >
-            {/* Left 7 Cols: Clean Video Preview */}
-            <div className="lg:col-span-7 flex flex-col lg:h-[680px]">
-              <VideoPreviewStage
-                activePreset={activePreset}
-                settings={settings}
-                metrics={metrics}
-                selectedDemoClip={selectedDemoClip}
-                onSelectDemoClip={setSelectedDemoClip}
-                uploadedVideoUrl={uploadedVideoUrl}
-                uploadedVideoName={uploadedVideoName}
-                onUploadVideo={handleUploadVideo}
-                onClearUploadedVideo={handleClearUploadedVideo}
-                onSourceDimensionsChange={handleSourceDimensionsChange}
-                canvasRef={canvasRef}
-                onCaptureSnapshot={handleCaptureSnapshot}
-              />
-            </div>
-
-            {/* Right 5 Cols: Simple 3-Step Controls */}
-            <div className="lg:col-span-5 flex flex-col lg:h-[680px]">
-              <EnhancementControls
-                activePreset={activePreset}
-                onSelectPreset={setActivePreset}
-                settings={settings}
-                onUpdateSettings={handleUpdateSettings}
-                onResetSettings={handleResetSettings}
-                metrics={metrics}
-                onStartImmediateExport={handleStartImmediateExport}
-                onAddToQueue={handleAddToQueue}
-                isExportingNow={isExportingNow}
-              />
-            </div>
-          </section>
-        )}
-
-        {/* TAB 2: Export Queue */}
-        {activeTab === 'queue' && (
-          <RenderQueuePanel
-            jobs={renderJobs}
-            onProcessAllQueued={handleProcessAllQueued}
-            onRemoveJob={handleRemoveJob}
-            onAddCurrentToQueue={handleAddToQueue}
+      {/* Main Content Area */}
+      <main className="relative z-10 flex-1">
+        {activeTab === 'optimizer' && (
+          <BareetOptimizerView
+            onOpenAnalyzer={() => setActiveTab('analyzer')}
+            onOpenGuide={() => setActiveTab('guide')}
           />
         )}
 
-        {/* TAB 3: Platform Bitrate Reference */}
-        {activeTab === 'specs' && (
+        {activeTab === 'analyzer' && <TikTokAnalyzerView />}
+
+        {activeTab === 'guide' && (
           <PlatformGuideSection
             activePreset={activePreset}
             onSelectPreset={(preset) => {
               setActivePreset(preset);
-              setActiveTab('studio');
+              setActiveTab('optimizer');
             }}
           />
         )}
       </main>
 
-      {/* Mobile Bottom Tab Bar for Android & iOS (< 768px) — Height 56px (h-14), within 15% sticky budget */}
+      {/* Footer (matches bareet.dev footer) */}
+      <footer className="relative z-10 border-t border-[#12152A] bg-[#07080F]">
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+          <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-center">
+            <div>
+              <div className="flex items-center gap-2 font-bold text-zinc-100">
+                <AppLogoIcon className="h-6 w-6 rounded-lg" />
+                <span>Bareet Method</span>
+              </div>
+              <p className="mt-1.5 text-xs text-zinc-500">
+                เอนจินวิดีโอของเราเอง · ปรับวิดีโอให้พร้อมใช้ทุกที่ ไม่ลดคุณภาพ
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-5 text-xs text-zinc-400">
+              <button
+                type="button"
+                onClick={() => setActiveTab('optimizer')}
+                className="transition-colors hover:text-zinc-100"
+              >
+                หน้าแรก (ปรับวิดีโอ)
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('analyzer')}
+                className="transition-colors hover:text-zinc-100"
+              >
+                วิเคราะห์คลิป TikTok
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('guide')}
+                className="transition-colors hover:text-zinc-100"
+              >
+                คู่มือบิตเรต & การตั้งค่า
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 flex items-center justify-between border-t border-[#12152A]/80 pt-4 text-[11px] text-zinc-500">
+            <span>© 2026 Bareet Method · ประมวลผลในเครื่องของคุณเป็นหลัก</span>
+            <span className="font-mono">engine 1.0</span>
+          </div>
+        </div>
+      </footer>
+
+      {/* Mobile Bottom Tab Bar (< 768px) */}
       <nav
         aria-label="เมนูมือถือ"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-[#0B0F19]/95 backdrop-blur-md border-t border-slate-800/80 grid grid-cols-4 items-center px-2"
+        className="fixed bottom-0 left-0 right-0 z-30 grid h-14 grid-cols-4 items-center border-t border-[#12152A] bg-[#07080F]/95 px-2 backdrop-blur-md md:hidden"
       >
         <button
           type="button"
-          onClick={() => setActiveTab('studio')}
-          className={`min-h-[44px] flex flex-col items-center justify-center rounded-lg transition-colors ${
-            activeTab === 'studio' ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+          onClick={() => setActiveTab('optimizer')}
+          className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg transition-colors ${
+            activeTab === 'optimizer'
+              ? 'text-[#38BDF8]'
+              : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">อัพสเกล</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('queue')}
-          className={`min-h-[44px] flex flex-col items-center justify-center rounded-lg transition-colors ${
-            activeTab === 'queue' ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <FolderDown className="w-4 h-4" />
-          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">
-            ไฟล์ ({renderJobs.length})
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path
+              d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12L13 2Z"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="mt-0.5 text-[10px] font-medium whitespace-nowrap">
+            หน้าแรก
           </span>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveTab('specs')}
-          className={`min-h-[44px] flex flex-col items-center justify-center rounded-lg transition-colors ${
-            activeTab === 'specs' ? 'text-orange-400' : 'text-slate-400 hover:text-slate-200'
+          onClick={() => setActiveTab('analyzer')}
+          className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg transition-colors ${
+            activeTab === 'analyzer'
+              ? 'text-[#38BDF8]'
+              : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
-          <Sliders className="w-4 h-4" />
-          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">บิตเรต</span>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+          </svg>
+          <span className="mt-0.5 text-[10px] font-medium whitespace-nowrap">
+            วิเคราะห์
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('guide')}
+          className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg transition-colors ${
+            activeTab === 'guide'
+              ? 'text-[#38BDF8]'
+              : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path
+              d="M4 6h16M4 12h16M4 18h10"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="mt-0.5 text-[10px] font-medium whitespace-nowrap">
+            คู่มือบิตเรต
+          </span>
         </button>
 
         <button
           type="button"
           onClick={() => setShowInstallModal(true)}
-          className="min-h-[44px] flex flex-col items-center justify-center rounded-lg text-slate-400 hover:text-orange-400 transition-colors"
+          className="flex min-h-[44px] flex-col items-center justify-center rounded-lg text-zinc-400 transition-colors hover:text-[#38BDF8]"
         >
-          <Smartphone className="w-4 h-4" />
-          <span className="text-[10px] font-medium mt-0.5 whitespace-nowrap">ติดตั้งแอป</span>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <rect x="6" y="2" width="12" height="20" rx="2" />
+            <path d="M12 18h.01" strokeLinecap="round" />
+          </svg>
+          <span className="mt-0.5 text-[10px] font-medium whitespace-nowrap">
+            ติดตั้งแอป
+          </span>
         </button>
       </nav>
 
