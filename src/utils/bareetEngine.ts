@@ -624,6 +624,9 @@ export function applyCleanBareetMoovTags(
   encoderTag = 'KrispBareet****bareet'
 ): Uint8Array {
   const topBoxes = parseMp4TopBoxes(bytes);
+  if (topBoxes.some((b) => b.type === 'moof')) {
+    return stampBareetPureFallback(bytes);
+  }
   const moovIdx = topBoxes.findIndex((b) => b.type === 'moov');
   if (moovIdx === -1) {
     return stampBareetPureFallback(bytes);
@@ -1028,6 +1031,469 @@ async function uploadChunksAndRunServerEndpoint(
   };
 }
 
+async function isServerUpscaleBackendAvailable(): Promise<boolean> {
+  if (typeof fetch !== 'function') return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1800);
+    const res = await fetch('/api/health', {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const ct = res.headers.get('content-type') || '';
+    return res.ok && ct.includes('application/json');
+  } catch {
+    return false;
+  }
+}
+
+function getBrowserMediaRecorderCandidates(): {
+  mimeType: string;
+  ext: 'mp4' | 'webm';
+}[] {
+  if (typeof MediaRecorder === 'undefined') {
+    return [{ mimeType: 'video/mp4', ext: 'mp4' }];
+  }
+  const allCandidates: { mimeType: string; ext: 'mp4' | 'webm' }[] = [
+    { mimeType: 'video/mp4;codecs=avc1,mp4a.40.2', ext: 'mp4' },
+    { mimeType: 'video/mp4;codecs=avc1', ext: 'mp4' },
+    { mimeType: 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ext: 'mp4' },
+    { mimeType: 'video/mp4;codecs=avc1.42E01E', ext: 'mp4' },
+    { mimeType: 'video/webm;codecs=vp8,opus', ext: 'webm' },
+    { mimeType: 'video/webm;codecs=vp9,opus', ext: 'webm' },
+    { mimeType: 'video/webm;codecs=vp8', ext: 'webm' },
+    { mimeType: 'video/webm', ext: 'webm' },
+    { mimeType: 'video/mp4', ext: 'mp4' },
+  ];
+  const supported = allCandidates.filter((c) => {
+    try {
+      return (
+        typeof MediaRecorder.isTypeSupported !== 'function' ||
+        MediaRecorder.isTypeSupported(c.mimeType)
+      );
+    } catch {
+      return false;
+    }
+  });
+  return supported.length > 0
+    ? supported
+    : [{ mimeType: 'video/webm', ext: 'webm' }];
+}
+
+async function probeRecordedVideoBlobDimensions(
+  blob: Blob
+): Promise<{ width: number; height: number; durationSec: number }> {
+  if (typeof document === 'undefined' || blob.size < 4096) {
+    return { width: 0, height: 0, durationSec: 0 };
+  }
+  return new Promise((resolve) => {
+    const testVideo = document.createElement('video');
+    testVideo.muted = true;
+    testVideo.playsInline = true;
+    const url = URL.createObjectURL(blob);
+    let settled = false;
+    const finish = (w: number, h: number, d: number) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      testVideo.removeAttribute('src');
+      resolve({
+        width: w || 0,
+        height: h || 0,
+        durationSec: Number.isFinite(d) && d > 0 ? d : 0,
+      });
+    };
+    const timer = setTimeout(
+      () => finish(testVideo.videoWidth, testVideo.videoHeight, testVideo.duration),
+      2600
+    );
+    testVideo.onloadeddata = () => {
+      clearTimeout(timer);
+      finish(testVideo.videoWidth, testVideo.videoHeight, testVideo.duration);
+    };
+    testVideo.onerror = () => {
+      clearTimeout(timer);
+      finish(0, 0, 0);
+    };
+    testVideo.src = url;
+  });
+}
+
+async function recordUpscaledCanvasPass(params: {
+  file: File;
+  outW: number;
+  outH: number;
+  outFps: number;
+  targetBitrateMbps: number;
+  aspectMode: UpscaleAspectMode;
+  sharpness: {
+    contrast: number;
+    vibrance: number;
+    brightness: number;
+  };
+  mimeChoice: { mimeType: string; ext: 'mp4' | 'webm' };
+  onProgress?: (fraction: number) => void;
+}): Promise<{
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+  durationSec: number;
+  ext: 'mp4' | 'webm';
+  mimeType: string;
+}> {
+  const { outW, outH, outFps, mimeChoice } = params;
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  // Chromium requires the canvas to be attached to the DOM to keep captureStream emitting frames reliably
+  canvas.style.cssText =
+    'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-10;';
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    throw new Error('Canvas 2D unavailable');
+  }
+
+  const video = document.createElement('video');
+  const srcUrl = URL.createObjectURL(params.file);
+  video.src = srcUrl;
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.crossOrigin = 'anonymous';
+
+  let audioCtx: AudioContext | null = null;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => resolve(), 3500);
+      video.onloadeddata = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      video.onerror = () => {
+        clearTimeout(t);
+        reject(new Error('ไม่สามารถถอดรหัสวิดีโอในเบราว์เซอร์ได้'));
+      };
+      video.load();
+    });
+
+    const srcW = video.videoWidth || outW;
+    const srcH = video.videoHeight || outH;
+    const durationSec =
+      Number.isFinite(video.duration) && video.duration > 0.3
+        ? Math.min(video.duration, 120)
+        : 3.5;
+
+    const canvasStream = canvas.captureStream(outFps);
+    const videoTrack = canvasStream.getVideoTracks()[0] as
+      | (MediaStreamTrack & { requestFrame?: () => void })
+      | undefined;
+
+    // Preserve audio cleanly without playing out loud through speakers
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (AudioCtx) {
+        audioCtx = new AudioCtx();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume().catch(() => {});
+        }
+        const source = audioCtx.createMediaElementSource(video);
+        const dest = audioCtx.createMediaStreamDestination();
+        source.connect(dest);
+        for (const track of dest.stream.getAudioTracks()) {
+          canvasStream.addTrack(track);
+        }
+      } else {
+        video.muted = true;
+      }
+    } catch {
+      video.muted = true;
+    }
+
+    const contrastPct = Math.round(100 + (params.sharpness.contrast / 100) * 16);
+    const satPct = Math.round(100 + (params.sharpness.vibrance / 100) * 35);
+    const brightPct = Math.round(100 + (params.sharpness.brightness / 100) * 12);
+    const filterCss = `contrast(${contrastPct}%) saturate(${satPct}%) brightness(${brightPct}%)`;
+
+    const drawCurrentFrame = (frameIdx: number) => {
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, outW, outH);
+
+      const srcAspect = srcW / srcH;
+      const dstAspect = outW / outH;
+
+      if (params.aspectMode === '9:16') {
+        let fgW = outW;
+        let fgH = outH;
+        if (srcAspect > dstAspect) {
+          fgH = outH;
+          fgW = Math.round(outH * srcAspect);
+        } else {
+          fgW = outW;
+          fgH = Math.round(outW / srcAspect);
+        }
+        const fgX = Math.round((outW - fgW) / 2);
+        const fgY = Math.round((outH - fgH) / 2);
+        ctx.filter = filterCss;
+        ctx.drawImage(video, fgX, fgY, fgW, fgH);
+      } else {
+        let fgW = outW;
+        let fgH = outH;
+        if (srcAspect > dstAspect) {
+          fgW = outW;
+          fgH = Math.round(outW / srcAspect);
+        } else {
+          fgH = outH;
+          fgW = Math.round(outH * srcAspect);
+        }
+        const fgX = Math.round((outW - fgW) / 2);
+        const fgY = Math.round((outH - fgH) / 2);
+        if (Math.abs(srcAspect - dstAspect) > 0.02) {
+          ctx.save();
+          ctx.filter = 'blur(24px) brightness(72%)';
+          const bgScale = Math.max(outW / srcW, outH / srcH);
+          const bgW = srcW * bgScale;
+          const bgH = srcH * bgScale;
+          ctx.drawImage(video, (outW - bgW) / 2, (outH - bgH) / 2, bgW, bgH);
+          ctx.restore();
+        }
+        ctx.filter = filterCss;
+        ctx.drawImage(video, fgX, fgY, fgW, fgH);
+      }
+      ctx.restore();
+
+      // 2x2 heartbeat pixel so MediaRecorder always registers dirty frames
+      ctx.fillStyle = frameIdx % 2 === 0 ? '#101827' : '#111928';
+      ctx.fillRect(outW - 2, outH - 2, 2, 2);
+      if (typeof videoTrack?.requestFrame === 'function') {
+        try {
+          videoTrack.requestFrame();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    video.currentTime = 0;
+    drawCurrentFrame(0);
+
+    const targetBps = Math.max(
+      4_000_000,
+      Math.round(params.targetBitrateMbps * 1_000_000)
+    );
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(canvasStream, {
+        mimeType: mimeChoice.mimeType,
+        videoBitsPerSecond: targetBps,
+        audioBitsPerSecond: 192_000,
+      });
+    } catch {
+      recorder = new MediaRecorder(canvasStream, {
+        videoBitsPerSecond: targetBps,
+      });
+    }
+
+    const chunks: BlobPart[] = [];
+    recorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+    };
+
+    const stoppedPromise = new Promise<Blob>((resolve) => {
+      recorder.onstop = () => {
+        const finalMime = recorder.mimeType || mimeChoice.mimeType || 'video/mp4';
+        resolve(new Blob(chunks, { type: finalMime }));
+      };
+      recorder.onerror = () => {
+        const finalMime = recorder.mimeType || mimeChoice.mimeType || 'video/mp4';
+        resolve(new Blob(chunks, { type: finalMime }));
+      };
+    });
+
+    recorder.start(150);
+    await video.play().catch(() => {});
+
+    const frameIntervalMs = outFps >= 50 ? 22 : 33;
+    let frameIdx = 1;
+    let finished = false;
+    const startedAt = performance.now();
+    const maxWallMs = Math.max(5500, Math.round(durationSec * 1500 + 3500));
+
+    while (!finished) {
+      drawCurrentFrame(frameIdx++);
+      const currentPos = video.currentTime || 0;
+      const elapsedSec = (performance.now() - startedAt) / 1000;
+      const frac = Math.min(
+        0.95,
+        Math.max(0.05, Math.max(currentPos, elapsedSec * 0.7) / durationSec)
+      );
+      params.onProgress?.(frac);
+
+      if (
+        video.ended ||
+        (currentPos >= durationSec - 0.04 && frameIdx > 8) ||
+        performance.now() - startedAt >= maxWallMs
+      ) {
+        finished = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, frameIntervalMs));
+    }
+
+    video.pause();
+    if (recorder.state === 'recording') {
+      try {
+        recorder.requestData();
+      } catch {
+        // ignore
+      }
+      await new Promise((r) => setTimeout(r, 140));
+      try {
+        recorder.stop();
+      } catch {
+        // already inactive
+      }
+    }
+
+    const blob = await stoppedPromise;
+    const probed = await probeRecordedVideoBlobDimensions(blob);
+    const rawBytes = new Uint8Array(await blob.arrayBuffer());
+    const isMp4Magic =
+      rawBytes.byteLength >= 8 &&
+      rawBytes[4] === 0x66 &&
+      rawBytes[5] === 0x74 &&
+      rawBytes[6] === 0x79 &&
+      rawBytes[7] === 0x70;
+    const actualExt: 'mp4' | 'webm' = isMp4Magic
+      ? 'mp4'
+      : (blob.type || mimeChoice.mimeType).includes('webm')
+      ? 'webm'
+      : mimeChoice.ext;
+    const actualMime = actualExt === 'mp4' ? 'video/mp4' : 'video/webm';
+
+    return {
+      bytes: rawBytes,
+      width: probed.width,
+      height: probed.height,
+      durationSec: probed.durationSec > 0 ? probed.durationSec : durationSec,
+      ext: actualExt,
+      mimeType: actualMime,
+    };
+  } finally {
+    video.pause();
+    video.removeAttribute('src');
+    URL.revokeObjectURL(srcUrl);
+    if (audioCtx) {
+      void audioCtx.close().catch(() => {});
+    }
+    if (canvas.parentNode) {
+      canvas.parentNode.removeChild(canvas);
+    }
+  }
+}
+
+/**
+ * 100% In-Browser GPU-Accelerated Upscaler (runs on Vercel / static hosting / offline PWA)
+ * using DOM-mounted Canvas 2D high-quality scaling + color/contrast filters + verified MediaRecorder export.
+ */
+async function upscaleVideoInBrowserForBareet(params: {
+  file: File;
+  targetWidth: number;
+  targetHeight: number;
+  targetFps: number;
+  targetBitrateMbps: number;
+  aspectMode: UpscaleAspectMode;
+  sharpness: {
+    contrast: number;
+    vibrance: number;
+    brightness: number;
+  };
+  onProgress?: (fraction: number) => void;
+}): Promise<{
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+  fps: number;
+  bitrateMbps: number;
+  ext: 'mp4' | 'webm';
+  mimeType: string;
+}> {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const maxAllowedDim = isMobile ? 1920 : 2560;
+  const rawMax = Math.max(params.targetWidth, params.targetHeight);
+  const clampScale = rawMax > maxAllowedDim ? maxAllowedDim / rawMax : 1;
+  const outW = Math.max(2, Math.round((params.targetWidth * clampScale) / 2) * 2);
+  const outH = Math.max(2, Math.round((params.targetHeight * clampScale) / 2) * 2);
+  const outFps = params.targetFps === 30 ? 30 : 60;
+
+  const candidates = getBrowserMediaRecorderCandidates();
+  const primary = candidates[0];
+  const fallbackWebm =
+    candidates.find((c) => c.mimeType === 'video/webm;codecs=vp8,opus') ||
+    candidates.find((c) => c.ext === 'webm');
+
+  const attempts: {
+    mimeChoice: { mimeType: string; ext: 'mp4' | 'webm' };
+    w: number;
+    h: number;
+  }[] = [{ mimeChoice: primary, w: outW, h: outH }];
+
+  if (fallbackWebm && fallbackWebm.mimeType !== primary.mimeType) {
+    const safeScale =
+      Math.max(outW, outH) > 1920 ? 1920 / Math.max(outW, outH) : 1;
+    attempts.push({
+      mimeChoice: fallbackWebm,
+      w: Math.max(2, Math.round((outW * safeScale) / 2) * 2),
+      h: Math.max(2, Math.round((outH * safeScale) / 2) * 2),
+    });
+  }
+
+  for (const attempt of attempts) {
+    try {
+      const res = await recordUpscaledCanvasPass({
+        file: params.file,
+        outW: attempt.w,
+        outH: attempt.h,
+        outFps,
+        targetBitrateMbps: params.targetBitrateMbps,
+        aspectMode: params.aspectMode,
+        sharpness: params.sharpness,
+        mimeChoice: attempt.mimeChoice,
+        onProgress: params.onProgress,
+      });
+
+      if (res.bytes.byteLength >= 8192 && res.width > 0 && res.height > 0) {
+        const actualBitrateMbps = Number(
+          ((res.bytes.byteLength * 8) / Math.max(0.5, res.durationSec) / 1_000_000).toFixed(1)
+        );
+        return {
+          bytes: res.bytes,
+          width: res.width,
+          height: res.height,
+          fps: outFps,
+          bitrateMbps: actualBitrateMbps || params.targetBitrateMbps,
+          ext: res.ext,
+          mimeType: res.mimeType,
+        };
+      }
+    } catch {
+      // Try next safe MediaRecorder codec candidate
+    }
+  }
+
+  throw new Error('Browser MediaRecorder could not capture valid video stream');
+}
+
 export interface BareetProcessResult {
   blob: Blob;
   outputName: string;
@@ -1035,6 +1501,7 @@ export interface BareetProcessResult {
   ghostSamples: number;
   cachedOrAlreadyPatched: boolean;
   usedRefineryServer: boolean;
+  usedInBrowserUpscaler?: boolean;
   elapsedMs: number;
   outputSizeBytes: number;
   outputWidth?: number;
@@ -1100,49 +1567,131 @@ export async function processVideoWithBareetEngine(
     customMbps > 0 ||
     callbacks?.forceReencode
   ) {
-    const targetMbpsForEncode = customMbps > 0 ? customMbps : dims.defaultBitrateMbps;
-    const prepLabel = `AI Upscale: กำลังอัพสเกลเป็น ${dims.width}×${dims.height} · ${customFps} FPS · ${targetMbpsForEncode} Mbps…`;
-    callbacks?.onStage?.('prep', prepLabel, 45);
-    const reframeParam = aspectMode === '9:16' ? 'center-crop' : 'fit-blur';
-    const upscaledRes = await uploadChunksAndRunServerEndpoint(
-      bytes,
-      `width=${dims.width}&height=${dims.height}&fps=${customFps}&bitrateMbps=${targetMbpsForEncode}&sharpness=${sharpSpec.sharpness}&denoise=${sharpSpec.denoise}&contrast=${sharpSpec.contrast}&vibrance=${sharpSpec.vibrance}&brightness=${sharpSpec.brightness}&reframe=${reframeParam}`,
-      (frac) => {
-        callbacks?.onStage?.('prep', prepLabel, Math.round(45 + frac * 40));
+    const targetMbpsForEncode =
+      customMbps > 0 ? customMbps : dims.defaultBitrateMbps;
+    const serverReachable = await isServerUpscaleBackendAvailable();
+
+    if (serverReachable) {
+      try {
+        const prepLabel = `AI Upscale: กำลังอัพสเกลเป็น ${dims.width}×${dims.height} · ${customFps} FPS · ${targetMbpsForEncode} Mbps…`;
+        callbacks?.onStage?.('prep', prepLabel, 45);
+        const reframeParam = aspectMode === '9:16' ? 'center-crop' : 'fit-blur';
+        const upscaledRes = await uploadChunksAndRunServerEndpoint(
+          bytes,
+          `width=${dims.width}&height=${dims.height}&fps=${customFps}&bitrateMbps=${targetMbpsForEncode}&sharpness=${sharpSpec.sharpness}&denoise=${sharpSpec.denoise}&contrast=${sharpSpec.contrast}&vibrance=${sharpSpec.vibrance}&brightness=${sharpSpec.brightness}&reframe=${reframeParam}`,
+          (frac) => {
+            callbacks?.onStage?.('prep', prepLabel, Math.round(45 + frac * 40));
+          }
+        );
+
+        const outW = upscaledRes.width || dims.width;
+        const outH = upscaledRes.height || dims.height;
+        const outFps = upscaledRes.fps || customFps;
+        const outBitrate = upscaledRes.bitrateMbps || targetMbpsForEncode;
+
+        callbacks?.onStage?.(
+          'patch',
+          'กำลังฝังแพตช์ Bareet & ตรวจสอบความเข้ากันได้ MP4…',
+          90
+        );
+        const taggedBytes = applyCleanBareetMoovTags(upscaledRes.bytes);
+        const outBlob = new Blob([taggedBytes.slice().buffer], {
+          type: 'video/mp4',
+        });
+        callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
+        return {
+          blob: outBlob,
+          outputName,
+          appliedMode: 'bareetv10',
+          ghostSamples: 0,
+          cachedOrAlreadyPatched: false,
+          usedRefineryServer: true,
+          elapsedMs: Math.round(performance.now() - t0),
+          outputSizeBytes: outBlob.size,
+          outputWidth: outW,
+          outputHeight: outH,
+          outputFps: outFps,
+          outputBitrateMbps: outBitrate,
+        };
+      } catch {
+        // Backend unexpectedly unavailable — fall through to In-Browser GPU Upscaler below!
       }
-    );
+    }
 
-    const outW = upscaledRes.width || dims.width;
-    const outH = upscaledRes.height || dims.height;
-    const outFps = upscaledRes.fps || customFps;
-    const outBitrate = upscaledRes.bitrateMbps || targetMbpsForEncode;
+    // In-Browser Fallback Upscaler (works 100% on Vercel / static hosting / offline PWA)
+    try {
+      const browserPrepLabel = `AI Upscale (In-Browser): กำลังอัพสเกลเป็น ${dims.width}×${dims.height} · ${targetMbpsForEncode} Mbps…`;
+      callbacks?.onStage?.('prep', browserPrepLabel, 45);
+      const browserUpscaled = await upscaleVideoInBrowserForBareet({
+        file,
+        targetWidth: dims.width,
+        targetHeight: dims.height,
+        targetFps: customFps,
+        targetBitrateMbps: targetMbpsForEncode,
+        aspectMode,
+        sharpness: sharpSpec,
+        onProgress: (frac) => {
+          callbacks?.onStage?.(
+            'prep',
+            browserPrepLabel,
+            Math.round(45 + frac * 42)
+          );
+        },
+      });
 
-    callbacks?.onStage?.(
-      'patch',
-      'กำลังฝังแพตช์ Bareet & ตรวจสอบความเข้ากันได้ MP4…',
-      90
-    );
-    // Cleanly embed Bareet metadata in moov/udta/meta/ilst while preserving positive mvhd duration
-    // and valid stco offsets so Windows Media Player, QuickTime, iOS, Android & TikTok play cleanly
-    const taggedBytes = applyCleanBareetMoovTags(upscaledRes.bytes);
-    const outBlob = new Blob([taggedBytes.slice().buffer], {
-      type: 'video/mp4',
-    });
-    callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
-    return {
-      blob: outBlob,
-      outputName,
-      appliedMode: 'bareetv10',
-      ghostSamples: 0,
-      cachedOrAlreadyPatched: false,
-      usedRefineryServer: true,
-      elapsedMs: Math.round(performance.now() - t0),
-      outputSizeBytes: outBlob.size,
-      outputWidth: outW,
-      outputHeight: outH,
-      outputFps: outFps,
-      outputBitrateMbps: outBitrate,
-    };
+      callbacks?.onStage?.(
+        'patch',
+        'กำลังฝังแพตช์ Bareet & สรุปไฟล์…',
+        92
+      );
+      const finalBytes =
+        browserUpscaled.ext === 'mp4'
+          ? applyCleanBareetMoovTags(browserUpscaled.bytes)
+          : browserUpscaled.bytes;
+      const finalFilename =
+        browserUpscaled.ext === 'webm'
+          ? outputName.replace(/\.mp4$/i, '.webm')
+          : outputName;
+      const outBlob = new Blob([finalBytes.slice().buffer], {
+        type: browserUpscaled.mimeType,
+      });
+      callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
+      return {
+        blob: outBlob,
+        outputName: finalFilename,
+        appliedMode: 'bareetv10',
+        ghostSamples: 0,
+        cachedOrAlreadyPatched: false,
+        usedRefineryServer: false,
+        usedInBrowserUpscaler: true,
+        elapsedMs: Math.round(performance.now() - t0),
+        outputSizeBytes: outBlob.size,
+        outputWidth: browserUpscaled.width,
+        outputHeight: browserUpscaled.height,
+        outputFps: browserUpscaled.fps,
+        outputBitrateMbps: browserUpscaled.bitrateMbps,
+      };
+    } catch {
+      // Final graceful fallback: apply clean Bareet moov tags in-browser without failing
+      callbacks?.onStage?.(
+        'patch',
+        'กำลังฝังแพตช์ Bareet ในเบราว์เซอร์…',
+        90
+      );
+      const safeBytes = applyCleanBareetMoovTags(bytes);
+      const outBlob = new Blob([safeBytes.slice().buffer], { type: 'video/mp4' });
+      callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
+      return {
+        blob: outBlob,
+        outputName,
+        appliedMode: 'bareetv10',
+        ghostSamples: 0,
+        cachedOrAlreadyPatched: false,
+        usedRefineryServer: false,
+        elapsedMs: Math.round(performance.now() - t0),
+        outputSizeBytes: outBlob.size,
+      };
+    }
   }
 
   // Case 2: In-Browser Bareet Engine Direct Patch (No Re-encode, 100% Original Quality!)
@@ -1214,67 +1763,70 @@ export async function processVideoWithBareetEngine(
       }
     }
 
-    // If direct patch needed Method Prep (e.g. WebM or non-standard MP4 timing), run lossless/fast remux then patch!
-    callbacks?.onStage?.('prep', 'Method Prep: กำลังจัดเตรียมโครงสร้างไฟล์…', 52);
-    try {
-      const remuxedRes = await uploadChunksAndRunServerEndpoint(
-        bytes,
-        'remuxOnly=1&width=1080&height=1920&fps=60',
-        (frac) => {
-          callbacks?.onStage?.(
-            'prep',
-            'Method Prep: กำลังจัดเตรียมโครงสร้างไฟล์…',
-            Math.round(52 + frac * 25)
-          );
-        }
-      );
-
-      callbacks?.onStage?.('patch', `กำลังปรับปรุงวิดีโอ (${targetMode})…`, 85);
-      for (const modeCandidate of candidateModes) {
-        try {
-          const res = engine.patchFile(remuxedRes.bytes, {
-            mode: modeCandidate,
-          });
-          if (res?.output && res.output.byteLength > 64) {
-            const safeOutput = sanitizeMp4ForUniversalPlayback(res.output);
-            const outBlob = new Blob([safeOutput.slice().buffer], {
-              type: 'video/mp4',
-            });
-            callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
-            return {
-              blob: outBlob,
-              outputName,
-              appliedMode:
-                targetMode === 'bareetv17'
-                  ? 'bareetv17'
-                  : res.mode || modeCandidate,
-              ghostSamples: res.ghostSamples || 0,
-              cachedOrAlreadyPatched: false,
-              usedRefineryServer: true,
-              elapsedMs: Math.round(performance.now() - t0),
-              outputSizeBytes: outBlob.size,
-            };
+    // If direct patch needed Method Prep and backend server is available, run lossless remux then patch
+    const serverReachable = await isServerUpscaleBackendAvailable();
+    if (serverReachable) {
+      callbacks?.onStage?.('prep', 'Method Prep: กำลังจัดเตรียมโครงสร้างไฟล์…', 52);
+      try {
+        const remuxedRes = await uploadChunksAndRunServerEndpoint(
+          bytes,
+          'remuxOnly=1&width=1080&height=1920&fps=60',
+          (frac) => {
+            callbacks?.onStage?.(
+              'prep',
+              'Method Prep: กำลังจัดเตรียมโครงสร้างไฟล์…',
+              Math.round(52 + frac * 25)
+            );
           }
-        } catch {
-          // continue
-        }
-      }
+        );
 
-      const tagged = applyCleanBareetMoovTags(remuxedRes.bytes);
-      const outBlob = new Blob([tagged.slice().buffer], { type: 'video/mp4' });
-      callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
-      return {
-        blob: outBlob,
-        outputName,
-        appliedMode: targetMode,
-        ghostSamples: 0,
-        cachedOrAlreadyPatched: false,
-        usedRefineryServer: true,
-        elapsedMs: Math.round(performance.now() - t0),
-        outputSizeBytes: outBlob.size,
-      };
-    } catch {
-      // Fall through to clean in-browser moov tagger
+        callbacks?.onStage?.('patch', `กำลังปรับปรุงวิดีโอ (${targetMode})…`, 85);
+        for (const modeCandidate of candidateModes) {
+          try {
+            const res = engine.patchFile(remuxedRes.bytes, {
+              mode: modeCandidate,
+            });
+            if (res?.output && res.output.byteLength > 64) {
+              const safeOutput = sanitizeMp4ForUniversalPlayback(res.output);
+              const outBlob = new Blob([safeOutput.slice().buffer], {
+                type: 'video/mp4',
+              });
+              callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
+              return {
+                blob: outBlob,
+                outputName,
+                appliedMode:
+                  targetMode === 'bareetv17'
+                    ? 'bareetv17'
+                    : res.mode || modeCandidate,
+                ghostSamples: res.ghostSamples || 0,
+                cachedOrAlreadyPatched: false,
+                usedRefineryServer: true,
+                elapsedMs: Math.round(performance.now() - t0),
+                outputSizeBytes: outBlob.size,
+              };
+            }
+          } catch {
+            // continue
+          }
+        }
+
+        const tagged = applyCleanBareetMoovTags(remuxedRes.bytes);
+        const outBlob = new Blob([tagged.slice().buffer], { type: 'video/mp4' });
+        callbacks?.onStage?.('done', 'เสร็จแล้ว พร้อมดาวน์โหลด', 100);
+        return {
+          blob: outBlob,
+          outputName,
+          appliedMode: targetMode,
+          ghostSamples: 0,
+          cachedOrAlreadyPatched: false,
+          usedRefineryServer: true,
+          elapsedMs: Math.round(performance.now() - t0),
+          outputSizeBytes: outBlob.size,
+        };
+      } catch {
+        // Fall through to clean in-browser moov tagger
+      }
     }
   }
 

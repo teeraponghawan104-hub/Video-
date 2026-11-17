@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/((?!assets/|engine\\.mjs|sw\\.js|manifest\\.json|workbox-.*|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

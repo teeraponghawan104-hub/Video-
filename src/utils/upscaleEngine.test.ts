@@ -263,6 +263,30 @@ test('applyCleanBareetMoovTags embeds Bareet tags, shifts stco accurately, and p
   }
 });
 
+test('applyCleanBareetMoovTags appends clean free signature box when MP4 contains fragmented moof boxes', () => {
+  const ftyp = new Uint8Array([
+    0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 2, 0,
+  ]);
+  const moov = new Uint8Array([
+    0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x76,
+  ]);
+  const moof = new Uint8Array([
+    0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x66,
+  ]);
+  const combined = new Uint8Array(ftyp.length + moov.length + moof.length);
+  combined.set(ftyp, 0);
+  combined.set(moov, ftyp.length);
+  combined.set(moof, ftyp.length + moov.length);
+
+  const out = applyCleanBareetMoovTags(combined);
+  const boxes = parseMp4TopBoxes(out);
+  assert.deepEqual(
+    boxes.map((b) => b.type),
+    ['ftyp', 'moov', 'moof', 'free']
+  );
+});
+
+
 
 
 

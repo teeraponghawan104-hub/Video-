@@ -318,7 +318,7 @@ export const BareetOptimizerView: React.FC<BareetOptimizerViewProps> = ({
   };
 
   const triggerDownloadBlob = (blob: Blob, filename: string) => {
-    const safeFilename = filename.endsWith('.mp4')
+    const safeFilename = /\.(mp4|webm)$/i.test(filename)
       ? filename
       : formatBareetOutputFilename(filename);
     const url = URL.createObjectURL(blob);
@@ -334,21 +334,23 @@ export const BareetOptimizerView: React.FC<BareetOptimizerViewProps> = ({
   };
 
   const handleShareOrSaveMobile = async (blob: Blob, filename: string) => {
-    const safeFilename = filename.endsWith('.mp4')
+    const safeFilename = /\.(mp4|webm)$/i.test(filename)
       ? filename
       : formatBareetOutputFilename(filename);
-    const mp4File = new File([blob], safeFilename, { type: 'video/mp4' });
+    const outFile = new File([blob], safeFilename, {
+      type: blob.type || 'video/mp4',
+    });
     const nav = navigator as Navigator & {
       canShare?: (data?: ShareData) => boolean;
     };
     if (
       typeof nav.share === 'function' &&
       typeof nav.canShare === 'function' &&
-      nav.canShare({ files: [mp4File] })
+      nav.canShare({ files: [outFile] })
     ) {
       try {
         await nav.share({
-          files: [mp4File],
+          files: [outFile],
           title: safeFilename,
           text: 'ปรับความคมชัดด้วย Bareet Engine พร้อมอัป TikTok',
         });
@@ -718,6 +720,8 @@ export const BareetOptimizerView: React.FC<BareetOptimizerViewProps> = ({
             <span className="rounded-md bg-emerald-500/15 px-2.5 py-1 font-medium text-emerald-300">
               {doneResult.usedRefineryServer
                 ? 'AI Upscale + Bareet Patch'
+                : doneResult.usedInBrowserUpscaler
+                ? 'In-Browser GPU Upscale + Bareet'
                 : 'ไม่ re-encode ภาพคมเท่าต้นฉบับ'}
             </span>
             <span className="text-zinc-500">
@@ -836,7 +840,12 @@ export const BareetOptimizerView: React.FC<BareetOptimizerViewProps> = ({
                   strokeLinejoin="round"
                 />
               </svg>
-              <span>ดาวน์โหลดไฟล์ MP4</span>
+              <span>
+                ดาวน์โหลดไฟล์{' '}
+                {doneResult.outputName.toLowerCase().endsWith('.webm')
+                  ? 'WebM'
+                  : 'MP4'}
+              </span>
             </button>
 
             <button
